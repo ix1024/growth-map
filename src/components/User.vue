@@ -48,7 +48,9 @@ const CROP_MAX_ZOOM = 3;
 
 const avatarSrc = computed(() => String(g.userInfo?.avatar || "").trim());
 const avatarFallbackText = computed(() => {
-  const name = String(g.userInfo?.nickname || g.userInfo?.username || "").trim();
+  const name = String(
+    g.userInfo?.nickname || g.userInfo?.username || "",
+  ).trim();
   return name ? name.slice(0, 1) : "成";
 });
 const weekAttitudePoints = computed(() =>
@@ -375,10 +377,7 @@ const handleSaveProfile = async () => {
     ElMessage.warning("出生日期格式必须是 YYYY-MM-DD");
     return;
   }
-  if (
-    birthDate &&
-    dayjs().diff(dayjs(birthDate, "YYYY-MM-DD"), "year") < 5
-  ) {
+  if (birthDate && dayjs().diff(dayjs(birthDate, "YYYY-MM-DD"), "year") < 5) {
     ElMessage.warning("最小年龄是 5 岁");
     return;
   }
@@ -570,7 +569,10 @@ const handleLogout = async () => {
                 {{ avatarFallbackText }}
               </div>
               <div class="avatar-upload-actions">
-                <el-button class="btn-cancel avatar-upload-btn" @click="triggerAvatarUpload">
+                <el-button
+                  class="btn-cancel avatar-upload-btn"
+                  @click="triggerAvatarUpload"
+                >
                   选择图片
                 </el-button>
                 <el-button
@@ -719,7 +721,11 @@ const handleLogout = async () => {
           <el-button class="btn-cancel" @click="cancelAvatarCrop">
             取消
           </el-button>
-          <el-button class="btn-confirm" type="primary" @click="applyCropToAvatar">
+          <el-button
+            class="btn-confirm"
+            type="primary"
+            @click="applyCropToAvatar"
+          >
             确认裁剪
           </el-button>
         </div>
@@ -750,7 +756,7 @@ const handleLogout = async () => {
   border-radius: 999px;
   padding: 5px;
   background: conic-gradient(from 0deg, #ffd66b, #ff9ce8, #8ad8ff, #ffd66b);
-  animation: spinHalo 5s linear infinite;
+  // animation: spinHalo 5s linear infinite;//
 }
 
 .user-avatar {
@@ -958,7 +964,11 @@ const handleLogout = async () => {
   margin: 0 auto;
   overflow: hidden;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(250, 241, 230, 0.92));
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(250, 241, 230, 0.92)
+  );
   border: 1px solid rgba(255, 189, 144, 0.36);
   box-shadow: 0 12px 24px rgba(120, 88, 20, 0.14);
   touch-action: none;
@@ -981,8 +991,20 @@ const handleLogout = async () => {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to right, rgba(255, 255, 255, 0) 33.333%, rgba(255, 255, 255, 0.28) 33.333%, rgba(255, 255, 255, 0.28) 34%, rgba(255, 255, 255, 0) 34%),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0) 33.333%, rgba(255, 255, 255, 0.28) 33.333%, rgba(255, 255, 255, 0.28) 34%, rgba(255, 255, 255, 0) 34%);
+    linear-gradient(
+      to right,
+      rgba(255, 255, 255, 0) 33.333%,
+      rgba(255, 255, 255, 0.28) 33.333%,
+      rgba(255, 255, 255, 0.28) 34%,
+      rgba(255, 255, 255, 0) 34%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0) 33.333%,
+      rgba(255, 255, 255, 0.28) 33.333%,
+      rgba(255, 255, 255, 0.28) 34%,
+      rgba(255, 255, 255, 0) 34%
+    );
   background-size: 100% 100%;
   pointer-events: none;
 }
