@@ -1,0 +1,323 @@
+:root {
+  font-family:
+    "Baloo 2", "Nunito", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #2b2a48;
+  --bg-layer-1: radial-gradient(
+    circle at 15% 20%,
+    #ffe59e 0,
+    #ffe59e 14%,
+    transparent 15%
+  );
+  --bg-layer-2: radial-gradient(
+    circle at 85% 18%,
+    #b4f3ff 0,
+    #b4f3ff 12%,
+    transparent 13%
+  );
+  --bg-layer-3: radial-gradient(
+    circle at 25% 85%,
+    #ffc2f0 0,
+    #ffc2f0 12%,
+    transparent 13%
+  );
+  --bg-layer-4: linear-gradient(160deg, #fffbf2 0%, #f9f3ff 42%, #eefbff 100%);
+  --orb-1: rgba(255, 207, 104, 0.5);
+  --orb-2: rgba(120, 211, 255, 0.45);
+  --orb-3: rgba(255, 156, 215, 0.45);
+  --user-card-bg:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 244, 220, 0.9)),
+    linear-gradient(130deg, #fff2c2 0%, #ffe6fb 50%, #e4f7ff 100%);
+  --week-card-bg: linear-gradient(
+    140deg,
+    #fff6da 0%,
+    #ffe6ff 50%,
+    #def5ff 100%
+  );
+  --month-card-bg: linear-gradient(
+    145deg,
+    #e7f6ff 0%,
+    #f2ebff 45%,
+    #fff3d8 100%
+  );
+  --main-accent: #ff7b37;
+  --sub-accent: #ff5ca8;
+  --scroll-track: rgba(255, 255, 255, 0.8);
+  --scroll-thumb: color-mix(in srgb, var(--main-accent) 72%, #ffffff);
+  --scroll-thumb-hover: color-mix(in srgb, var(--sub-accent) 78%, #ffffff);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    var(--bg-layer-1), var(--bg-layer-2), var(--bg-layer-3), var(--bg-layer-4);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* Keep pinch zoom, prevent accidental double-tap zoom on interactions. */
+html,
+body,
+#app,
+button,
+a,
+[role="button"],
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+/* Prevent iOS from auto-zooming when focusing form fields. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    var(--scroll-thumb),
+    var(--scroll-thumb-hover)
+  );
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    var(--scroll-thumb-hover),
+    var(--sub-accent)
+  );
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:root[data-theme="ocean"] {
+  --bg-layer-1: radial-gradient(
+    circle at 15% 20%,
+    #b8f2ff 0,
+    #b8f2ff 14%,
+    transparent 15%
+  );
+  --bg-layer-2: radial-gradient(
+    circle at 88% 20%,
+    #9cd6ff 0,
+    #9cd6ff 12%,
+    transparent 13%
+  );
+  --bg-layer-3: radial-gradient(
+    circle at 24% 85%,
+    #9bffe2 0,
+    #9bffe2 12%,
+    transparent 13%
+  );
+  --bg-layer-4: linear-gradient(160deg, #f3fdff 0%, #edf4ff 45%, #e9fff9 100%);
+  --orb-1: rgba(129, 228, 255, 0.5);
+  --orb-2: rgba(93, 168, 255, 0.4);
+  --orb-3: rgba(102, 243, 212, 0.42);
+  --user-card-bg:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(225, 248, 255, 0.9)),
+    linear-gradient(130deg, #def5ff 0%, #dff4ff 50%, #d9fff2 100%);
+  --week-card-bg: linear-gradient(
+    140deg,
+    #dff5ff 0%,
+    #d9f7ff 50%,
+    #d8fff4 100%
+  );
+  --month-card-bg: linear-gradient(
+    145deg,
+    #dff2ff 0%,
+    #e1ecff 45%,
+    #d9fff4 100%
+  );
+  --main-accent: #1d95d8;
+  --sub-accent: #12b7aa;
+}
+
+:root[data-theme="rainbow"] {
+  --bg-layer-1: radial-gradient(
+    circle at 20% 18%,
+    #ffd08a 0,
+    #ffd08a 14%,
+    transparent 15%
+  );
+  --bg-layer-2: radial-gradient(
+    circle at 82% 20%,
+    #97d7ff 0,
+    #97d7ff 12%,
+    transparent 13%
+  );
+  --bg-layer-3: radial-gradient(
+    circle at 25% 82%,
+    #b9ff91 0,
+    #b9ff91 12%,
+    transparent 13%
+  );
+  --bg-layer-4: linear-gradient(
+    150deg,
+    #fff8d8 0%,
+    #ffdff6 25%,
+    #d8ecff 55%,
+    #e3ffd8 100%
+  );
+  --orb-1: rgba(255, 174, 88, 0.5);
+  --orb-2: rgba(126, 176, 255, 0.42);
+  --orb-3: rgba(164, 244, 114, 0.42);
+  --user-card-bg:
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.9),
+      rgba(255, 245, 203, 0.92)
+    ),
+    linear-gradient(130deg, #ffe8b3 0%, #ffd8f0 35%, #d8e8ff 70%, #e1ffcb 100%);
+  --week-card-bg: linear-gradient(
+    140deg,
+    #ffe7b0 0%,
+    #ffd7f0 38%,
+    #d9ebff 72%,
+    #e2ffcc 100%
+  );
+  --month-card-bg: linear-gradient(
+    145deg,
+    #ffe6ad 0%,
+    #ffd7ef 30%,
+    #dce9ff 68%,
+    #e6ffcf 100%
+  );
+  --main-accent: #ff7a1a;
+  --sub-accent: #d655ff;
+}
+
+:root[data-theme="eggparty"] {
+  --bg-layer-1: radial-gradient(
+    circle at 14% 18%,
+    #ffd36d 0,
+    #ffd36d 14%,
+    transparent 15%
+  );
+  --bg-layer-2: radial-gradient(
+    circle at 86% 18%,
+    #9fe3ff 0,
+    #9fe3ff 12%,
+    transparent 13%
+  );
+  --bg-layer-3: radial-gradient(
+    circle at 24% 84%,
+    #c9ff8f 0,
+    #c9ff8f 12%,
+    transparent 13%
+  );
+  --bg-layer-4: linear-gradient(
+    155deg,
+    #fff7cc 0%,
+    #ffd8ec 30%,
+    #d9ecff 66%,
+    #e7ffd8 100%
+  );
+  --orb-1: rgba(255, 189, 76, 0.48);
+  --orb-2: rgba(109, 193, 255, 0.42);
+  --orb-3: rgba(156, 239, 108, 0.4);
+  --user-card-bg:
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.92),
+      rgba(255, 250, 214, 0.9)
+    ),
+    linear-gradient(130deg, #ffe8a5 0%, #ffd9ef 35%, #d9ebff 70%, #e7ffd1 100%);
+  --week-card-bg: linear-gradient(
+    140deg,
+    #ffe5a1 0%,
+    #ffd4ec 35%,
+    #d6eaff 70%,
+    #e4ffca 100%
+  );
+  --month-card-bg: linear-gradient(
+    145deg,
+    #ffe8b3 0%,
+    #ffd8f2 32%,
+    #dbe9ff 68%,
+    #e8ffd2 100%
+  );
+  --main-accent: #ff9b00;
+  --sub-accent: #32b7ff;
+}
+
+.themed-confirm-box.el-message-box {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.86),
+      rgba(255, 255, 255, 0.66)
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--main-accent) 14%, #fff),
+      color-mix(in srgb, var(--sub-accent) 16%, #fff)
+    );
+  box-shadow: 0 16px 34px rgba(53, 63, 110, 0.2);
+  backdrop-filter: blur(14px) saturate(128%);
+  -webkit-backdrop-filter: blur(14px) saturate(128%);
+}
+
+.themed-confirm-box .el-message-box__title {
+  color: #334c78;
+  font-weight: 800;
+}
+
+.themed-confirm-box .el-message-box__content {
+  color: #4f5d80;
+}
+
+.themed-confirm-box .el-button {
+  border-radius: 999px;
+  font-weight: 700;
+  padding: 8px 16px;
+}
+
+.themed-confirm-box .el-button:not(.el-button--primary) {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  color: #57648a;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.themed-confirm-box .el-button--primary {
+  border: 0;
+  background: linear-gradient(90deg, var(--main-accent), var(--sub-accent));
+  box-shadow: 0 8px 16px color-mix(in srgb, var(--sub-accent) 32%, transparent);
+}
