@@ -9,6 +9,7 @@ import Month from "@/components/Month.vue";
 import LevelMap from "@/components/LevelMap.vue";
 import CoolLoading from "@/components/CoolLoading.vue";
 import LoginPanel from "@/components/LoginPanel.vue";
+import PetBuddy from "@/components/PetBuddy.vue";
 import { isRequestLoading } from "@/stores/requestLoading";
 import { ElMessage } from "element-plus";
 import { useGStore } from "@/stores/global";
@@ -44,6 +45,12 @@ const pageTitle = computed(() => {
   const name = g.userInfo?.nickname?.trim();
   if (name) return `${name}的成长地图`;
   return "少年成长地图";
+});
+
+const todayCompletionRate = computed(() => {
+  const today = dayjs().format("YYYY-MM-DD");
+  const todayBucket = g.monthlyPoints[today];
+  return todayBucket ? Math.min(todayBucket.points, 100) : 0;
 });
 
 const applyTheme = (theme: KidTheme) => {
@@ -343,6 +350,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           </div>
         </section>
       </el-drawer> -->
+    <PetBuddy :completion-rate="todayCompletionRate" />
   </main>
 </template>
 <style scoped lang="less">
