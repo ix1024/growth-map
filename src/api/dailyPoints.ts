@@ -50,6 +50,51 @@ export interface MonthMaxStreakPayload {
   maxStreak?: number;
 }
 
+export interface EatingCountPayload {
+  eatingCount?: number;
+  eating_count?: number;
+  eating?: number;
+  count?: number;
+  satiety?: number;
+  value?: number;
+}
+
+const normalizeEatingCount = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.floor(parsed));
+    }
+  }
+
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidates = [
+    record.eatingCount,
+    record.eating_count,
+    record.eating,
+    record.count,
+    record.satiety,
+    record.value,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = normalizeEatingCount(candidate);
+    if (parsed > 0 || candidate === 0) {
+      return parsed;
+    }
+  }
+
+  return 0;
+};
+
 export const getDailyPoints = (params?: {
   startDate?: string;
   endDate?: string;
@@ -89,4 +134,18 @@ export const updateAttitudePoints = (payload: {
   attitudePoints: number;
 }) => {
   return http.put<DailyPointRecord>("/daily-points/attitude", payload);
+};
+
+export const getTodayEatingCount = () => {
+  return http.get<unknown>("/daily-points/eating/today").then((response) => {
+    return normalizeEatingCount(response);
+  });
+};
+
+export const updateTodayEatingCount = (payload: {
+  eating: number;
+}) => {
+  return http.put<unknown>("/daily-points/eating", payload).then((response) => {
+    return normalizeEatingCount(response);
+  });
 };

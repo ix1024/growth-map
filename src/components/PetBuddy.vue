@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import dayjs from "dayjs";
+import { getEatingCount } from "@/api/pet";
+import {
+  getTodayEatingCount,
+  updateTodayEatingCount,
+} from "@/api/dailyPoints";
 
 const props = defineProps<{
   /** 待办完成率 0-100 */
@@ -8,7 +13,6 @@ const props = defineProps<{
 
 // ─── localStorage 持久化工具 ───
 const STORAGE_KEY_POS = "pet-buddy-pos";
-const STORAGE_KEY_FED = "pet-buddy-fed";
 const STORAGE_KEY_COLLAPSED = "pet-buddy-collapsed";
 
 const loadPos = (): { x: number; y: number } | null => {
@@ -25,25 +29,6 @@ const savePos = (x: number, y: number) => {
   localStorage.setItem(STORAGE_KEY_POS, JSON.stringify({ x, y }));
 };
 
-const loadFed = (): number => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_FED);
-    if (!raw) return 0;
-    const data = JSON.parse(raw);
-    if (data.date === dayjs().format("YYYY-MM-DD") && typeof data.amount === "number") {
-      return data.amount;
-    }
-  } catch {}
-  return 0;
-};
-
-const saveFed = (amount: number) => {
-  localStorage.setItem(
-    STORAGE_KEY_FED,
-    JSON.stringify({ date: dayjs().format("YYYY-MM-DD"), amount }),
-  );
-};
-
 const loadCollapsed = (): boolean => {
   try {
     return localStorage.getItem(STORAGE_KEY_COLLAPSED) === "1";
@@ -57,9 +42,10 @@ const containerRef = ref<HTMLElement | null>(null);
 const petState = ref<"hungry" | "eating" | "happy">("hungry");
 const showBubble = ref(true);
 const bubbleText = ref("");
+const growthDays = ref<number | null>(null);
 const isPetting = ref(false);
 const isFeeding = ref(false);
-const fedAmount = ref(loadFed());
+const fedAmount = ref(0);
 const bounceY = ref(0);
 const eyeBlink = ref(false);
 const petScale = ref(1);
@@ -151,6 +137,9 @@ const pettingTexts = [
 const feedableAmount = computed(() => Math.floor(props.completionRate));
 const canFeed = computed(() => fedAmount.value < feedableAmount.value);
 const satiety = computed(() => fedAmount.value);
+const growthDaysLabel = computed(() => {
+  return growthDays.value === null ? "--" : `${growthDays.value} 天`;
+});
 
 watch(satiety, (val) => {
   petState.value = val >= 80 ? "happy" : "hungry";
@@ -161,7 +150,6 @@ watch(
   () => {
     if (feedableAmount.value < fedAmount.value) {
       fedAmount.value = feedableAmount.value;
-      saveFed(fedAmount.value);
     }
   },
 );
@@ -452,9 +440,13 @@ const handleFeed = () => {
   const feedInterval = setInterval(() => {
     fed++;
     fedAmount.value = Math.min(fedAmount.value + 1, feedableAmount.value);
-    saveFed(fedAmount.value);
     if (fed >= step || fedAmount.value >= feedableAmount.value) {
       clearInterval(feedInterval);
+      void updateTodayEatingCount({ eating: fedAmount.value })
+        .then((count) => {
+          fedAmount.value = Math.min(Math.max(count, 0), feedableAmount.value);
+        })
+        .catch(() => {});
       isFeeding.value = false;
       bubbleText.value = fedAmount.value >= 80 ? "好饱！谢谢你~" : "还想再吃一点…";
       showBubble.value = true;
@@ -488,13 +480,31 @@ onMounted(() => {
     posY.value = window.innerHeight - 280;
   }
 
-  // 恢复饱食度状态
-  petState.value = fedAmount.value >= 80 ? "happy" : "hungry";
-
   startMumble();
   startBlink();
   animateBounce();
   drawLoop();
+
+  void Promise.allSettled([getEatingCount(), getTodayEatingCount()]).then(
+    ([growthResult, satietyResult]) => {
+      if (growthResult.status === "fulfilled") {
+        growthDays.value = growthResult.value;
+      } else {
+        growthDays.value = null;
+      }
+
+      if (satietyResult.status === "fulfilled") {
+        fedAmount.value = Math.min(
+          Math.max(satietyResult.value, 0),
+          feedableAmount.value,
+        );
+      } else {
+        fedAmount.value = 0;
+      }
+
+      petState.value = fedAmount.value >= 80 ? "happy" : "hungry";
+    },
+  );
 
   bubbleText.value =
     props.completionRate >= 80
@@ -554,6 +564,10 @@ onUnmounted(() => {
           <div class="pet-satiety">
             <span class="satiety-label">饱食度</span>
             <span class="satiety-value">{{ satiety }}%</span>
+          </div>
+          <div class="pet-growth">
+            <span class="growth-label">成长</span>
+            <span class="growth-value">{{ growthDaysLabel }}</span>
           </div>
           <div class="pet-status" :class="petState">
             {{ petState === 'happy' ? '😊 开心' : '😿 饿饿' }}
@@ -706,7 +720,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   margin-top: 2px;
 }
 
@@ -717,6 +732,24 @@ onUnmounted(() => {
 }
 
 .satiety-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #5D4037;
+  margin-left: 4px;
+}
+
+.pet-growth {
+  display: inline-flex;
+  align-items: center;
+}
+
+.growth-label {
+  font-size: 11px;
+  color: #8D6E63;
+  font-weight: 600;
+}
+
+.growth-value {
   font-size: 13px;
   font-weight: 800;
   color: #5D4037;
