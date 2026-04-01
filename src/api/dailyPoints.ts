@@ -6,6 +6,7 @@ export interface DailyPointRecord {
   recordDate: string;
   points: number;
   attitudePoints?: number;
+  eating?: number;
   selectedIds?: number[];
   createdAt?: string | null;
   updatedAt?: string | null;

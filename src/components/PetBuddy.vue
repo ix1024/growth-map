@@ -2,6 +2,7 @@
 import dayjs from "dayjs";
 import { getEatingCount } from "@/api/pet";
 import {
+  getDailyPoints,
   getTodayEatingCount,
   updateTodayEatingCount,
 } from "@/api/dailyPoints";
@@ -16,6 +17,10 @@ const STORAGE_KEY_POS = "pet-buddy-pos";
 const STORAGE_KEY_COLLAPSED = "pet-buddy-collapsed";
 const STORAGE_KEY_INTIMACY = "pet-buddy-intimacy";
 const STORAGE_KEY_LAST_TOUCH = "pet-buddy-last-touch";
+const STORAGE_KEY_STREAK_DAYS = "pet-buddy-streak-days";
+const STORAGE_KEY_DAILY_EVENT = "pet-buddy-daily-event";
+const STORAGE_KEY_LAST_ESCAPE = "pet-buddy-last-escape";
+const STORAGE_KEY_LAST_CELEBRATION = "pet-buddy-last-celebration";
 
 const loadPos = (): { x: number; y: number } | null => {
   try {
@@ -60,6 +65,63 @@ const saveLastTouch = (value: number) => {
   localStorage.setItem(STORAGE_KEY_LAST_TOUCH, String(value));
 };
 
+const loadStreakDays = (): number => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_STREAK_DAYS);
+    const value = Number(raw);
+    if (Number.isFinite(value)) return clampNumber(Math.floor(value), 0, 999);
+  } catch {}
+  return 0;
+};
+
+const saveStreakDays = (value: number) => {
+  localStorage.setItem(
+    STORAGE_KEY_STREAK_DAYS,
+    String(clampNumber(Math.floor(value), 0, 999)),
+  );
+};
+
+const getCurrentMonthRange = () => {
+  const startDate = dayjs().startOf("month").format("YYYY-MM-DD");
+  const endDate = dayjs().endOf("month").format("YYYY-MM-DD");
+  return { startDate, endDate };
+};
+
+const loadDailyEventDate = (): string => {
+  try {
+    return localStorage.getItem(STORAGE_KEY_DAILY_EVENT) || "";
+  } catch {}
+  return "";
+};
+
+const saveDailyEventDate = (dateKey: string) => {
+  localStorage.setItem(STORAGE_KEY_DAILY_EVENT, dateKey);
+};
+
+const loadLastEscape = (): number => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LAST_ESCAPE);
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  } catch {}
+  return 0;
+};
+
+const saveLastEscape = (value: number) => {
+  localStorage.setItem(STORAGE_KEY_LAST_ESCAPE, String(value));
+};
+
+const loadLastCelebration = (): string => {
+  try {
+    return localStorage.getItem(STORAGE_KEY_LAST_CELEBRATION) || "";
+  } catch {}
+  return "";
+};
+
+const saveLastCelebration = (dateKey: string) => {
+  localStorage.setItem(STORAGE_KEY_LAST_CELEBRATION, dateKey);
+};
+
 const loadCollapsed = (): boolean => {
   try {
     return localStorage.getItem(STORAGE_KEY_COLLAPSED) === "1";
@@ -70,16 +132,24 @@ const loadCollapsed = (): boolean => {
 // ─── 状态 ───
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
-type PetMood = "hungry" | "eating" | "happy" | "curious" | "bored" | "sleepy";
+type PetMood = "hungry" | "eating" | "happy" | "curious" | "bored" | "sleepy" | "shy" | "requesting";
+type GrowthStage = "baby" | "child" | "teen" | "adult";
 const petState = ref<PetMood>("hungry");
 const showBubble = ref(true);
 const bubbleText = ref("");
 const growthDays = ref<number | null>(null);
+const streakDays = ref(loadStreakDays());
+const monthlyDailyPoints = ref<Array<{ recordDate: string; eating?: number }>>([]);
 const isPetting = ref(false);
+const isPoking = ref(false);
 const isFeeding = ref(false);
+const isCelebrating = ref(false);
+const isSpecialAction = ref(false);
+const taskPulse = ref(0);
 const fedAmount = ref(0);
 const intimacy = ref(loadIntimacy());
 const lastTouchAt = ref(loadLastTouch());
+const lastEscapeAt = ref(loadLastEscape());
 const bounceY = ref(0);
 const eyeBlink = ref(false);
 const petScale = ref(1);
@@ -87,6 +157,26 @@ const collapsed = ref(loadCollapsed());
 
 // 心形粒子
 const hearts = ref<Array<{ x: number; y: number; opacity: number; size: number; vy: number }>>([]);
+const confetti = ref<Array<{
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  rotation: number;
+  vr: number;
+  size: number;
+  life: number;
+  color: string;
+}>>([]);
+const footprints = ref<Array<{
+  x: number;
+  y: number;
+  opacity: number;
+  size: number;
+  rotation: number;
+  vx: number;
+  vy: number;
+}>>([]);
 
 // ─── 拖拽 ───
 const posX = ref(0);
@@ -140,6 +230,61 @@ const onPointerUp = () => {
   }
 };
 
+const escapeFromPointer = (clientX: number, clientY: number) => {
+  if (collapsed.value || isDragging.value || isPetting.value || isPoking.value || isFeeding.value) return;
+
+  const now = Date.now();
+  if (now - lastEscapeAt.value < 1800) return;
+
+  const el = containerRef.value;
+  if (!el) return;
+
+  const rect = el.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const dx = centerX - clientX;
+  const dy = centerY - clientY;
+  const distance = Math.hypot(dx, dy);
+
+  if (distance > 160) return;
+
+  const strength = clampNumber((160 - distance) / 160, 0.35, 1);
+  const safeDistance = Math.max(distance, 1);
+  const moveX = (dx / safeDistance) * (30 + strength * 40);
+  const moveY = (dy / safeDistance) * (18 + strength * 24);
+  const clamped = clampPos(posX.value + moveX, posY.value + moveY);
+  posX.value = clamped.x;
+  posY.value = clamped.y;
+
+  footprints.value.push({
+    x: centerX - rect.left,
+    y: centerY - rect.top,
+    opacity: 0.55,
+    size: 6 + strength * 4,
+    rotation: Math.atan2(dy, dx) + Math.PI / 2,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: -0.35 - Math.random() * 0.3,
+  });
+
+  lastEscapeAt.value = now;
+  saveLastEscape(now);
+  petState.value = intimacy.value >= 70 ? "requesting" : "shy";
+  bubbleText.value = evadeTexts[Math.floor(Math.random() * evadeTexts.length)];
+  showBubble.value = true;
+  bumpIntimacy(1);
+  markInteraction();
+
+  setTimeout(() => {
+    if (!isPetting.value && !isPoking.value && !isFeeding.value) {
+      showBubble.value = false;
+    }
+  }, 1800);
+};
+
+const onWindowPointerMove = (e: PointerEvent) => {
+  escapeFromPointer(e.clientX, e.clientY);
+};
+
 // ─── 文案 ───
 const hungryTexts = [
   "肚子好饿呀…",
@@ -168,6 +313,65 @@ const curiousTexts = [
   "今天也一起加油吧",
 ];
 
+const requestingTexts = [
+  "来摸摸我嘛",
+  "我想要你的关注",
+  "戳一下我也可以",
+  "陪我玩一会儿好不好",
+  "我已经在等你啦",
+];
+
+const celebrationTexts = [
+  "太厉害了！今天满分完成！",
+  "今天你也太强了吧！",
+  "冲刺成功，必须庆祝一下！",
+  "满分达成，给你一个大大的赞！",
+];
+
+const taskBoostTexts = [
+  "任务在变好，我看见啦！",
+  "继续加油，我会陪你一起冲！",
+  "进度涨了，我也跟着开心起来了",
+  "今天的节奏不错，保持住！",
+];
+
+const evadeTexts = [
+  "哎呀，别追我！",
+  "我会躲开哦~",
+  "抓不到我吧",
+  "靠太近啦，我要跑了",
+];
+
+const dailyEvents = [
+  {
+    title: "今天发现了小玩具",
+    text: "我捡到一个小玩具，要不要陪我玩一下？",
+    intimacyDelta: 3,
+  },
+  {
+    title: "今天有点想你",
+    text: "今天好像特别想你，来陪我一会儿吧。",
+    intimacyDelta: 4,
+  },
+  {
+    title: "今天想被夸夸",
+    text: "我今天表现不错吧？夸夸我，我会更开心。",
+    intimacyDelta: 2,
+  },
+  {
+    title: "今天想散步",
+    text: "我有点坐不住了，陪我转一圈好吗？",
+    intimacyDelta: 3,
+  },
+];
+
+const shyTexts = [
+  "哎呀，被戳到了…",
+  "别突然戳我嘛，我会害羞",
+  "嘻嘻，有点痒",
+  "再戳我一次也可以，但要轻一点",
+];
+
 const boredTexts = [
   "我有点无聊了…",
   "你怎么还不来找我呀",
@@ -194,13 +398,302 @@ const feedableAmount = computed(() => Math.floor(props.completionRate));
 const canFeed = computed(() => fedAmount.value < feedableAmount.value);
 const satiety = computed(() => fedAmount.value);
 const intimacyPercent = computed(() => intimacy.value);
+const growthStage = computed<GrowthStage>(() => {
+  const days = growthDays.value ?? 0;
+  if (days < 7) return "baby";
+  if (days < 30) return "child";
+  if (days < 90) return "teen";
+  return "adult";
+});
+const growthStageLabel = computed(() => {
+  if (growthDays.value === null) {
+    return "待成长";
+  }
+  switch (growthStage.value) {
+    case "baby":
+      return "幼崽";
+    case "child":
+      return "少年";
+    case "teen":
+      return "成长中";
+    case "adult":
+      return "成熟";
+    default:
+      return "幼崽";
+  }
+});
+const growthStageScale = computed(() => {
+  switch (growthStage.value) {
+    case "baby":
+      return 1.0;
+    case "child":
+      return 1.04;
+    case "teen":
+      return 1.08;
+    case "adult":
+      return 1.12;
+    default:
+      return 1.0;
+  }
+});
+const growthPalette = computed(() => {
+  switch (growthStage.value) {
+    case "baby":
+      return {
+        bodyColor: "#F3D6FF",
+        bodyGlow: "#FFF0FF",
+        earInner: "#F7B9D3",
+        eyeOpen: 6.2,
+        eyeWidth: 2.6,
+        blush: "rgba(255,171,194,0.42)",
+        tailWidth: 6,
+        accent: "#B57EDC",
+      };
+    case "child":
+      return {
+        bodyColor: "#FFE0B2",
+        bodyGlow: "#FFF6DD",
+        earInner: "#FFB74D",
+        eyeOpen: 6.0,
+        eyeWidth: 2.5,
+        blush: "rgba(255,138,128,0.35)",
+        tailWidth: 6,
+        accent: "#E67E22",
+      };
+    case "teen":
+      return {
+        bodyColor: "#C8E6C9",
+        bodyGlow: "#E8F5E9",
+        earInner: "#81C784",
+        eyeOpen: 5.8,
+        eyeWidth: 2.4,
+        blush: "rgba(255,138,128,0.28)",
+        tailWidth: 6.2,
+        accent: "#43A047",
+      };
+    case "adult":
+      return {
+        bodyColor: "#D7E3FF",
+        bodyGlow: "#EEF4FF",
+        earInner: "#90A4AE",
+        eyeOpen: 5.4,
+        eyeWidth: 2.3,
+        blush: "rgba(255,138,128,0.22)",
+        tailWidth: 6.2,
+        accent: "#3D5A80",
+      };
+    default:
+      return {
+        bodyColor: "#E0E0E0",
+        bodyGlow: "#F6F6F6",
+        earInner: "#BDBDBD",
+        eyeOpen: 5.5,
+        eyeWidth: 2.4,
+        blush: "rgba(255,138,128,0.3)",
+        tailWidth: 6,
+        accent: "#8D6E63",
+      };
+  }
+});
+const streakLabel = computed(() => `${streakDays.value} 天`);
 const growthDaysLabel = computed(() => {
   return growthDays.value === null ? "--" : `${growthDays.value} 天`;
 });
 
+const streakMilestones = [3, 7, 14, 30];
+const specialActionKey = "pet-buddy-last-special-action";
+const streakRewardTexts = [
+  "连续陪伴太棒了！我记住啦",
+  "我们已经坚持好多天了，继续保持",
+  "今天也没缺席，给你一个大大的赞",
+  "这种默契我很喜欢，继续一起加油",
+];
+
+const loadLastSpecialAction = (): string => {
+  try {
+    return localStorage.getItem(specialActionKey) || "";
+  } catch {}
+  return "";
+};
+
+const saveLastSpecialAction = (dateKey: string) => {
+  localStorage.setItem(specialActionKey, dateKey);
+};
+
+const computeEatingStreak = (
+  list: Array<{ recordDate: string; eating?: number }>,
+) => {
+  const eatingMap = new Map(
+    list.map((record) => [record.recordDate, Number(record.eating ?? 0)]),
+  );
+  let streak = 0;
+  let cursor = dayjs();
+  const monthStart = dayjs().startOf("month");
+
+  while (cursor.isSame(monthStart, "month")) {
+    const dateKey = cursor.format("YYYY-MM-DD");
+    const eating = Number(eatingMap.get(dateKey) ?? 0);
+    if (eating > 0) {
+      streak += 1;
+      cursor = cursor.subtract(1, "day");
+      continue;
+    }
+    break;
+  }
+
+  return streak;
+};
+
+const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: number }>) => {
+  monthlyDailyPoints.value = list;
+  const nextStreak = computeEatingStreak(list);
+  const prevStreak = streakDays.value;
+  streakDays.value = nextStreak;
+  saveStreakDays(nextStreak);
+
+  if (nextStreak > prevStreak && streakMilestones.includes(nextStreak)) {
+    bubbleText.value =
+      streakRewardTexts[Math.floor(Math.random() * streakRewardTexts.length)];
+    showBubble.value = true;
+    bumpIntimacy(nextStreak >= 14 ? 4 : nextStreak >= 7 ? 3 : 2);
+    taskPulse.value = 1;
+    setTimeout(() => {
+      taskPulse.value = 0;
+    }, 900);
+    setTimeout(() => {
+      if (!isPetting.value && !isPoking.value && !isFeeding.value) {
+        showBubble.value = false;
+      }
+    }, 2400);
+  }
+};
+
+const refreshMonthlyEatingStreak = async () => {
+  const { startDate, endDate } = getCurrentMonthRange();
+  try {
+    const response = await getDailyPoints({ startDate, endDate });
+    const list = Array.isArray(response?.list) ? response.list : [];
+    syncStreakFromMonthlyPoints(list);
+  } catch {
+    // Keep the cached streak if the monthly query fails.
+  }
+};
+
+const showDailyEvent = () => {
+  const event = dailyEvents[Math.floor(Math.random() * dailyEvents.length)];
+  bubbleText.value = `🎁 ${event.title}：${event.text}`;
+  showBubble.value = true;
+  bumpIntimacy(event.intimacyDelta);
+  markInteraction();
+  setTimeout(() => {
+    if (showBubble.value) {
+      showBubble.value = false;
+    }
+  }, 4500);
+};
+
+const triggerSpecialAction = () => {
+  const todayKey = dayjs().format("YYYY-MM-DD");
+  if (streakDays.value < 7 || loadLastSpecialAction() === todayKey) return;
+  saveLastSpecialAction(todayKey);
+
+  isSpecialAction.value = true;
+  bubbleText.value = "✨ 解锁隐藏动作：转圈撒娇！";
+  showBubble.value = true;
+  bumpIntimacy(2);
+  taskPulse.value = 1;
+  setTimeout(() => {
+    taskPulse.value = 0;
+  }, 900);
+  setTimeout(() => {
+    if (showBubble.value) {
+      showBubble.value = false;
+    }
+  }, 2200);
+  setTimeout(() => {
+    isSpecialAction.value = false;
+  }, 1800);
+};
+
+const celebrateCompletion = () => {
+  const todayKey = dayjs().format("YYYY-MM-DD");
+  if (loadLastCelebration() === todayKey) return;
+  saveLastCelebration(todayKey);
+
+  isCelebrating.value = true;
+  petScale.value = 1.16;
+  petState.value = "happy";
+  bubbleText.value =
+    celebrationTexts[Math.floor(Math.random() * celebrationTexts.length)];
+  showBubble.value = true;
+  bumpIntimacy(5);
+  markInteraction();
+
+  for (let i = 0; i < 7; i += 1) {
+    hearts.value.push({
+      x: 28 + Math.random() * 64,
+      y: 12 + Math.random() * 24,
+      opacity: 1,
+      size: 12 + Math.random() * 10,
+      vy: -0.7 - Math.random() * 0.9,
+    });
+  }
+
+  const colors = ["#FFB74D", "#FF8A65", "#FFD54F", "#FFF176", "#F06292", "#81D4FA"];
+  for (let i = 0; i < 18; i += 1) {
+    const angle = (Math.PI * 2 * i) / 18;
+    const speed = 1.8 + Math.random() * 2.8;
+    confetti.value.push({
+      x: 60,
+      y: 22,
+      vx: Math.cos(angle) * speed * (0.8 + Math.random() * 0.5),
+      vy: Math.sin(angle) * speed - 2.4,
+      rotation: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.35,
+      size: 4 + Math.random() * 4,
+      life: 1,
+      color: colors[i % colors.length],
+    });
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    footprints.value.push({
+      x: 34 + Math.random() * 52,
+      y: 48 + Math.random() * 18,
+      opacity: 0.48,
+      size: 4 + Math.random() * 3,
+      rotation: -0.35 + Math.random() * 0.7,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: -0.15 - Math.random() * 0.15,
+    });
+  }
+
+  setTimeout(() => {
+    isCelebrating.value = false;
+    petScale.value = 1;
+    confetti.value = [];
+    syncMood();
+    setTimeout(() => {
+      if (showBubble.value) {
+        showBubble.value = false;
+      }
+    }, 2200);
+  }, 2200);
+};
+
 const syncMood = () => {
   const hour = dayjs().hour();
   const idleMinutes = Math.floor((Date.now() - lastTouchAt.value) / 60000);
+
+  if (isCelebrating.value) {
+    petState.value = "happy";
+    return;
+  }
+
+  if (isPoking.value) {
+    petState.value = "shy";
+    return;
+  }
 
   if (isFeeding.value) {
     petState.value = "eating";
@@ -218,7 +711,12 @@ const syncMood = () => {
   }
 
   if (idleMinutes >= 20) {
-    petState.value = intimacy.value >= 65 ? "curious" : "bored";
+    petState.value = intimacy.value >= 75 ? "requesting" : intimacy.value >= 65 ? "curious" : "bored";
+    return;
+  }
+
+  if (idleMinutes >= 10 && intimacy.value >= 70) {
+    petState.value = "requesting";
     return;
   }
 
@@ -241,10 +739,14 @@ const getMoodTexts = () => {
       return happyTexts;
     case "curious":
       return curiousTexts;
+    case "requesting":
+      return requestingTexts;
     case "bored":
       return boredTexts;
     case "sleepy":
       return sleepyTexts;
+    case "shy":
+      return shyTexts;
     case "eating":
       return [
         "啊呜啊呜…",
@@ -272,11 +774,41 @@ watch([satiety, intimacy, isFeeding], () => {
   syncMood();
 });
 
+watch(isPoking, () => {
+  syncMood();
+});
+
+watch(intimacy, () => {
+  syncMood();
+});
+
 watch(
   () => props.completionRate,
-  () => {
+  (newRate, oldRate) => {
     if (feedableAmount.value < fedAmount.value) {
       fedAmount.value = feedableAmount.value;
+    }
+    const prevRate = Number(oldRate ?? 0);
+    const nextRate = Number(newRate ?? 0);
+    if (nextRate > prevRate) {
+      taskPulse.value = 1;
+      setTimeout(() => {
+        taskPulse.value = 0;
+      }, 900);
+      if (!isCelebrating.value && nextRate < 100) {
+        bubbleText.value =
+          taskBoostTexts[Math.floor(Math.random() * taskBoostTexts.length)];
+        showBubble.value = true;
+        bumpIntimacy(nextRate >= 80 ? 2 : 1);
+        setTimeout(() => {
+          if (showBubble.value && !isPetting.value && !isPoking.value && !isFeeding.value) {
+            showBubble.value = false;
+          }
+        }, 1800);
+      }
+    }
+    if (prevRate < 100 && nextRate >= 100) {
+      celebrateCompletion();
     }
     syncMood();
   },
@@ -303,8 +835,33 @@ const startMoodLoop = () => {
   moodTimer = setInterval(() => {
     if (!isPetting.value && !isFeeding.value) {
       syncMood();
+      if (
+        petState.value === "requesting" &&
+        !showBubble.value &&
+        !collapsed.value
+      ) {
+        const texts = requestingTexts;
+        bubbleText.value = texts[Math.floor(Math.random() * texts.length)];
+        showBubble.value = true;
+        setTimeout(() => {
+          showBubble.value = false;
+        }, 2800);
+      }
     }
   }, 30000);
+};
+
+let dailyEventTimer: ReturnType<typeof setTimeout> | null = null;
+const startDailyEvent = () => {
+  const todayKey = dayjs().format("YYYY-MM-DD");
+  if (loadDailyEventDate() === todayKey) return;
+  saveDailyEventDate(todayKey);
+
+  if (dailyEventTimer) clearTimeout(dailyEventTimer);
+  dailyEventTimer = setTimeout(() => {
+    if (collapsed.value) return;
+    showDailyEvent();
+  }, 1200);
 };
 
 // ─── 眨眼 ───
@@ -326,10 +883,19 @@ const jumpDir = ref(1); // 1=右跳，-1=左跳
 const jumpOffsetX = ref(0);
 const animateBounce = () => {
   const t = Date.now() / 600;
-  const isHappy = petState.value === "happy" || petState.value === "curious";
+  const isHappy = petState.value === "happy" || petState.value === "curious" || petState.value === "requesting";
+  const isCelebratingNow = isCelebrating.value;
+  const isSpecialActionNow = isSpecialAction.value;
+  const isRequesting = petState.value === "requesting";
+  const isShy = petState.value === "shy";
   const isSleepy = petState.value === "sleepy";
 
-  if (isHappy) {
+  if (isSpecialActionNow) {
+    const spinT = (Date.now() % 900) / 900;
+    bounceY.value = Math.sin(spinT * Math.PI * 2) * 4;
+    jumpPhase.value = spinT;
+    jumpOffsetX.value = Math.sin(spinT * Math.PI * 4) * 8;
+  } else if (isHappy || isCelebratingNow) {
     // 开心蹦蹦跳跳：大幅弹跳 + 左右蹦
     const jumpT = (Date.now() % 1200) / 1200; // 0~1 周期 1.2s
     // 用抛物线模拟跳跃：y = -4h*t*(t-1)，h=16
@@ -340,6 +906,13 @@ const animateBounce = () => {
       jumpDir.value = Math.random() > 0.5 ? 1 : -1;
     }
     jumpOffsetX.value = Math.sin(jumpT * Math.PI) * 6 * jumpDir.value;
+    if (isRequesting) {
+      jumpOffsetX.value *= 0.6;
+      bounceY.value += 1;
+    }
+  } else if (isShy) {
+    bounceY.value = Math.sin(t * 2) * 2;
+    jumpOffsetX.value = Math.sin(t * 3) * 1.5;
   } else if (isSleepy) {
     bounceY.value = Math.sin(t) * 1.2 + 1.2;
     jumpOffsetX.value = 0;
@@ -352,6 +925,24 @@ const animateBounce = () => {
   hearts.value = hearts.value
     .map((h) => ({ ...h, y: h.y + h.vy, opacity: h.opacity - 0.012 }))
     .filter((h) => h.opacity > 0);
+  confetti.value = confetti.value
+    .map((p) => ({
+      ...p,
+      x: p.x + p.vx,
+      y: p.y + p.vy,
+      vy: p.vy + 0.08,
+      rotation: p.rotation + p.vr,
+      life: p.life - 0.015,
+    }))
+    .filter((p) => p.life > 0);
+  footprints.value = footprints.value
+    .map((f) => ({
+      ...f,
+      x: f.x + f.vx,
+      y: f.y + f.vy,
+      opacity: f.opacity - 0.015,
+    }))
+    .filter((f) => f.opacity > 0);
   bounceFrame = requestAnimationFrame(animateBounce);
 };
 
@@ -375,15 +966,23 @@ const drawPet = () => {
 
   const cx = w / 2 + jumpOffsetX.value;
   const cy = h / 2 + 6 + bounceY.value;
-  const baseScale = petScale.value * 0.62;
+  const baseScale = petScale.value * 0.72;
+  const petVisualScale = 1.1;
+  const stageScale = growthStageScale.value;
 
   // 开心时落地瞬间挤压、起跳拉伸
   const isHappy = petState.value === "happy" || petState.value === "curious";
+  const isCelebratingNow = isCelebrating.value;
+  const isSpecialActionNow = isSpecialAction.value;
+  const isRequesting = petState.value === "requesting";
+  const isShy = petState.value === "shy";
   const isSleepy = petState.value === "sleepy";
   const isBored = petState.value === "bored";
+  const taskGlow = taskPulse.value;
+  const palette = growthPalette.value;
   let scaleX = baseScale;
   let scaleY = baseScale;
-  if (isHappy) {
+  if (isHappy || isCelebratingNow) {
     const jt = jumpPhase.value;
     if (jt < 0.1) {
       // 起跳蓄力：横向压扁、纵向缩短
@@ -402,6 +1001,14 @@ const drawPet = () => {
       scaleY = baseScale * sq;
     }
   }
+  if (taskGlow > 0) {
+    scaleX *= 1 + taskGlow * 0.05;
+    scaleY *= 1 + taskGlow * 0.05;
+  }
+  if (isSpecialActionNow) {
+    scaleX *= 1.06;
+    scaleY *= 1.06;
+  }
 
   ctx.save();
   ctx.translate(cx, cy);
@@ -410,31 +1017,61 @@ const drawPet = () => {
   if (isHappy) {
     const tilt = Math.sin(jumpPhase.value * Math.PI) * 0.08 * jumpDir.value;
     ctx.rotate(tilt);
+    if (isRequesting) {
+      ctx.rotate(Math.sin(Date.now() / 450) * 0.03);
+    }
+  } else if (isSpecialActionNow) {
+    ctx.rotate(Math.sin(Date.now() / 180) * 0.32);
+  } else if (isShy) {
+    ctx.rotate(Math.sin(Date.now() / 500) * 0.05);
   } else if (isSleepy) {
     ctx.rotate(-0.04);
   }
 
-  ctx.scale(scaleX, scaleY);
+  ctx.scale(scaleX * petVisualScale * stageScale, scaleY * petVisualScale * stageScale);
 
-  const bodyColor = isHappy
+  if (taskGlow > 0) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 48 + taskGlow * 10, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 183, 77, ${0.12 + taskGlow * 0.18})`;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+  }
+  if (isSpecialActionNow) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 52, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(109, 76, 255, ${0.16 + Math.abs(Math.sin(Date.now() / 220)) * 0.16})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  const bodyColor = isHappy || isCelebratingNow
     ? "#FFD54F"
-    : isSleepy
-      ? "#D7E3FF"
-      : "#E0E0E0";
-  const bodyGlow = isHappy
+    : isRequesting
+      ? "#FFE082"
+    : palette.bodyColor;
+  const bodyGlow = isHappy || isCelebratingNow
     ? "#FFF176"
-    : isSleepy
-      ? "#EEF4FF"
-      : "#BDBDBD";
+    : isRequesting
+      ? "#FFF5C2"
+      : palette.bodyGlow;
 
   // 身体阴影（跳得越高阴影越小越淡）
-  const shadowScale = isHappy
+  const shadowScale = isHappy || isCelebratingNow
     ? 1 - Math.sin(jumpPhase.value * Math.PI) * 0.3
+    : isRequesting
+      ? 0.98
+    : isShy
+      ? 0.96
     : isSleepy
       ? 0.92
       : 1;
-  const shadowAlpha = isHappy
+  const shadowAlpha = isHappy || isCelebratingNow
     ? 0.08 - Math.sin(jumpPhase.value * Math.PI) * 0.04
+    : isRequesting
+      ? 0.07
+    : isShy
+      ? 0.07
     : isSleepy
       ? 0.06
       : 0.08;
@@ -461,7 +1098,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(-27, -30); ctx.lineTo(-33, -47); ctx.lineTo(-18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy ? "#FFAB91" : isSleepy ? "#C5CAE9" : "#E8A0BF";
+  ctx.fillStyle = isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   ctx.beginPath();
@@ -472,25 +1109,42 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(27, -30); ctx.lineTo(33, -47); ctx.lineTo(18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy ? "#FFAB91" : isSleepy ? "#C5CAE9" : "#E8A0BF";
+  ctx.fillStyle = isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   // 眼睛
   if (eyeBlink.value) {
     ctx.strokeStyle = "#5D4037";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = palette.eyeWidth;
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(-16, -6); ctx.lineTo(-8, -6); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(8, -6); ctx.lineTo(16, -6); ctx.stroke();
-  } else if (isHappy) {
+  } else if (isHappy || isCelebratingNow) {
     ctx.strokeStyle = "#5D4037";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = palette.eyeWidth;
     ctx.lineCap = "round";
-    ctx.beginPath(); ctx.arc(-12, -6, 6, Math.PI, 0, true); ctx.stroke();
-    ctx.beginPath(); ctx.arc(12, -6, 6, Math.PI, 0, true); ctx.stroke();
+    if (growthStage.value === "adult") {
+      ctx.beginPath(); ctx.arc(-12, -7, palette.eyeOpen - 1.1, Math.PI * 0.1, Math.PI * 0.9, true); ctx.stroke();
+      ctx.beginPath(); ctx.arc(12, -7, palette.eyeOpen - 1.1, Math.PI * 0.1, Math.PI * 0.9, true); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(-12, -6, palette.eyeOpen, Math.PI, 0, true); ctx.stroke();
+      ctx.beginPath(); ctx.arc(12, -6, palette.eyeOpen, Math.PI, 0, true); ctx.stroke();
+    }
+  } else if (isRequesting) {
+    ctx.strokeStyle = "#5D4037";
+    ctx.lineWidth = palette.eyeWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(-12, -6, palette.eyeOpen - 0.4, Math.PI, 0, true); ctx.stroke();
+    ctx.beginPath(); ctx.arc(12, -6, palette.eyeOpen - 0.4, Math.PI, 0, true); ctx.stroke();
+  } else if (isShy) {
+    ctx.strokeStyle = "#5D4037";
+    ctx.lineWidth = palette.eyeWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(-12, -8, palette.eyeOpen - 1, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(12, -8, palette.eyeOpen - 1, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
   } else if (isSleepy) {
     ctx.strokeStyle = "#5D4037";
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = palette.eyeWidth;
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(-16, -5); ctx.lineTo(-8, -6); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(8, -6); ctx.lineTo(16, -5); ctx.stroke();
@@ -506,18 +1160,30 @@ const drawPet = () => {
   }
 
   // 腮红
-  if (isHappy || isPetting.value) {
+  if (isHappy || isCelebratingNow || isPetting.value || isShy || isRequesting) {
     ctx.beginPath(); ctx.ellipse(-22, 4, 7, 4, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,138,128,0.35)"; ctx.fill();
+    ctx.fillStyle = palette.blush; ctx.fill();
     ctx.beginPath(); ctx.ellipse(22, 4, 7, 4, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,138,128,0.35)"; ctx.fill();
+    ctx.fillStyle = palette.blush; ctx.fill();
   }
 
   // 嘴巴
-  if (isHappy) {
+  if (isHappy || isCelebratingNow) {
     ctx.beginPath();
-    ctx.arc(0, 6, 8, 0.1 * Math.PI, 0.9 * Math.PI);
+    if (growthStage.value === "adult") {
+      ctx.arc(0, 7, 9, 0.05 * Math.PI, 0.95 * Math.PI);
+    } else {
+      ctx.arc(0, 6, 8, 0.1 * Math.PI, 0.9 * Math.PI);
+    }
     ctx.strokeStyle = "#5D4037"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
+  } else if (isRequesting) {
+    ctx.beginPath();
+    ctx.arc(0, 8, 7, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.strokeStyle = "#8D6E63"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
+  } else if (isShy) {
+    ctx.beginPath();
+    ctx.arc(0, 9, 6, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.strokeStyle = "#B26A7A"; ctx.lineWidth = 1.8; ctx.lineCap = "round"; ctx.stroke();
   } else if (isFeeding.value) {
     ctx.beginPath(); ctx.ellipse(0, 8, 5, 6, 0, 0, Math.PI * 2);
     ctx.fillStyle = "#EF5350"; ctx.fill();
@@ -532,7 +1198,7 @@ const drawPet = () => {
   }
 
   // 胡须
-  ctx.strokeStyle = isHappy ? "#8D6E63" : isSleepy ? "#D0D7E8" : "#BDBDBD";
+  ctx.strokeStyle = isHappy || isCelebratingNow ? "#8D6E63" : isRequesting ? "#C28B33" : palette.accent;
   ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(-20, 2); ctx.lineTo(-38, -2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-20, 6); ctx.lineTo(-38, 8); ctx.stroke();
@@ -542,9 +1208,9 @@ const drawPet = () => {
   // 尾巴
   ctx.beginPath();
   ctx.moveTo(34, 18);
-  const tailWag = Math.sin(Date.now() / 300) * (isHappy ? 12 : isSleepy ? 1 : isBored ? 2 : 4);
+  const tailWag = Math.sin(Date.now() / 300) * (isHappy || isCelebratingNow ? 12 : isRequesting ? 6 : isShy ? 3 : isSleepy ? 1 : isBored ? 2 : 4);
   ctx.quadraticCurveTo(55 + tailWag, 0, 48 + tailWag, -20);
-  ctx.strokeStyle = bodyColor; ctx.lineWidth = 6; ctx.lineCap = "round"; ctx.stroke();
+  ctx.strokeStyle = bodyColor; ctx.lineWidth = palette.tailWidth; ctx.lineCap = "round"; ctx.stroke();
 
   // 饱食度进度条
   if (satiety.value > 0) {
@@ -590,6 +1256,31 @@ const drawPet = () => {
     ctx.fillText("❤", heart.x, heart.y);
     ctx.restore();
   });
+
+  // 庆祝彩纸
+  confetti.value.forEach((piece) => {
+    ctx.save();
+    ctx.translate(piece.x, piece.y);
+    ctx.rotate(piece.rotation);
+    ctx.globalAlpha = Math.max(piece.life, 0);
+    ctx.fillStyle = piece.color;
+    ctx.fillRect(-piece.size / 2, -piece.size / 2, piece.size, piece.size * 0.65);
+    ctx.restore();
+  });
+
+  // 脚印轨迹
+  footprints.value.forEach((step) => {
+    ctx.save();
+    ctx.translate(step.x, step.y);
+    ctx.rotate(step.rotation);
+    ctx.globalAlpha = Math.max(step.opacity, 0);
+    ctx.fillStyle = "rgba(120, 88, 64, 0.38)";
+    ctx.beginPath();
+    ctx.ellipse(-step.size * 0.25, 0, step.size * 0.28, step.size * 0.42, 0, 0, Math.PI * 2);
+    ctx.ellipse(step.size * 0.25, 0, step.size * 0.28, step.size * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
 };
 
 // ─── 摸它 ───
@@ -598,11 +1289,14 @@ const handlePet = () => {
   isPetting.value = true;
   petScale.value = 1.08;
   bumpIntimacy(2);
-  markInteraction();
 
   const petTexts = pettingTexts.concat(getMoodTexts());
   bubbleText.value = petTexts[Math.floor(Math.random() * petTexts.length)];
   showBubble.value = true;
+  markInteraction();
+  if (streakDays.value >= 7) {
+    triggerSpecialAction();
+  }
 
   for (let i = 0; i < 3; i++) {
     hearts.value.push({
@@ -622,6 +1316,43 @@ const handlePet = () => {
   }, 1500);
 };
 
+const handlePoke = () => {
+  if (isFeeding.value || hasMoved) return;
+  isPoking.value = true;
+  petScale.value = 1.06;
+  bumpIntimacy(4);
+
+  bubbleText.value = shyTexts[Math.floor(Math.random() * shyTexts.length)];
+  showBubble.value = true;
+  markInteraction();
+
+  hearts.value.push(
+    {
+      x: 40 + Math.random() * 40,
+      y: 18 + Math.random() * 18,
+      opacity: 1,
+      size: 12 + Math.random() * 6,
+      vy: -0.6 - Math.random() * 0.4,
+    },
+    {
+      x: 45 + Math.random() * 30,
+      y: 20 + Math.random() * 16,
+      opacity: 1,
+      size: 9 + Math.random() * 6,
+      vy: -0.5 - Math.random() * 0.5,
+    },
+  );
+
+  setTimeout(() => {
+    isPoking.value = false;
+    petScale.value = 1;
+    syncMood();
+    setTimeout(() => {
+      showBubble.value = false;
+    }, 1800);
+  }, 1100);
+};
+
 // ─── 喂食 ───
 const handleFeed = () => {
   if (!canFeed.value || isFeeding.value) return;
@@ -637,13 +1368,14 @@ const handleFeed = () => {
       void updateTodayEatingCount({ eating: fedAmount.value })
         .then((count) => {
           fedAmount.value = Math.min(Math.max(count, 0), feedableAmount.value);
+          void refreshMonthlyEatingStreak();
         })
         .catch(() => {});
       bumpIntimacy(3);
-      markInteraction();
       isFeeding.value = false;
       bubbleText.value = fedAmount.value >= 80 ? "好饱！谢谢你~" : "还想再吃一点…";
       showBubble.value = true;
+      markInteraction();
       syncMood();
       setTimeout(() => { showBubble.value = false; }, 2500);
     }
@@ -677,10 +1409,12 @@ onMounted(() => {
 
   startMumble();
   startMoodLoop();
+  startDailyEvent();
   startBlink();
   animateBounce();
   drawLoop();
   syncMood();
+  window.addEventListener("pointermove", onWindowPointerMove, { passive: true });
 
   void Promise.allSettled([getEatingCount(), getTodayEatingCount()]).then(
     ([growthResult, satietyResult]) => {
@@ -703,19 +1437,31 @@ onMounted(() => {
       syncMood();
     },
   );
+  void refreshMonthlyEatingStreak();
 
   bubbleText.value =
     props.completionRate >= 80
       ? "今天任务完成得不错哦~"
       : "快去完成任务来喂我吧~";
+
+  if (props.completionRate >= 100) {
+    setTimeout(() => {
+      celebrateCompletion();
+    }, 900);
+  }
 });
 
 onUnmounted(() => {
   if (mumbleTimer) clearInterval(mumbleTimer);
   if (moodTimer) clearInterval(moodTimer);
+  if (dailyEventTimer) clearTimeout(dailyEventTimer);
   if (blinkTimer) clearInterval(blinkTimer);
   if (bounceFrame) cancelAnimationFrame(bounceFrame);
   if (drawFrame) cancelAnimationFrame(drawFrame);
+  footprints.value = [];
+  confetti.value = [];
+  hearts.value = [];
+  window.removeEventListener("pointermove", onWindowPointerMove);
 });
 </script>
 
@@ -772,12 +1518,24 @@ onUnmounted(() => {
             <span class="growth-label">成长</span>
             <span class="growth-value">{{ growthDaysLabel }}</span>
           </div>
+          <div class="pet-stage">
+            <span class="stage-label">阶段</span>
+            <span class="stage-value">{{ growthStageLabel }}</span>
+          </div>
+          <div class="pet-streak">
+            <span class="streak-label">连续</span>
+            <span class="streak-value">{{ streakLabel }}</span>
+          </div>
           <div class="pet-status" :class="petState">
             {{
               petState === 'happy'
                 ? '😊 开心'
                 : petState === 'curious'
                   ? '✨ 想玩'
+                  : petState === 'requesting'
+                    ? '🥺 求关注'
+                  : petState === 'shy'
+                    ? '🙈 害羞'
                   : petState === 'bored'
                     ? '😶 无聊'
                     : petState === 'sleepy'
@@ -792,6 +1550,9 @@ onUnmounted(() => {
         <div class="pet-actions">
           <button class="pet-btn pet-btn-pet" @click.stop="handlePet" :disabled="isPetting">
             🖐 摸摸
+          </button>
+          <button class="pet-btn pet-btn-poke" @click.stop="handlePoke" :disabled="isPoking">
+            👆 戳戳
           </button>
           <button
             class="pet-btn pet-btn-feed"
@@ -924,8 +1685,8 @@ onUnmounted(() => {
   transition: transform 0.15s ease;
 
   &.mini {
-    width: 52px !important;
-    height: 52px !important;
+    width: 64px !important;
+    height: 64px !important;
   }
 
   &:active { transform: scale(0.96); }
@@ -989,6 +1750,42 @@ onUnmounted(() => {
   margin-left: 4px;
 }
 
+.pet-stage {
+  display: inline-flex;
+  align-items: center;
+}
+
+.stage-label {
+  font-size: 11px;
+  color: #8D6E63;
+  font-weight: 600;
+}
+
+.stage-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #3D5A80;
+  margin-left: 4px;
+}
+
+.pet-streak {
+  display: inline-flex;
+  align-items: center;
+}
+
+.streak-label {
+  font-size: 11px;
+  color: #8D6E63;
+  font-weight: 600;
+}
+
+.streak-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #C75C00;
+  margin-left: 4px;
+}
+
 .pet-status {
   font-size: 11px;
   font-weight: 700;
@@ -1002,6 +1799,14 @@ onUnmounted(() => {
   &.curious {
     background: rgba(255, 183, 77, 0.18);
     color: #E65100;
+  }
+  &.requesting {
+    background: rgba(255, 241, 118, 0.28);
+    color: #B26A00;
+  }
+  &.shy {
+    background: rgba(248, 187, 208, 0.28);
+    color: #AD1457;
   }
   &.bored {
     background: rgba(189, 189, 189, 0.22);
@@ -1048,6 +1853,12 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #FFE0B2, #FFCC80);
   color: #5D4037;
   box-shadow: 0 3px 8px rgba(255, 183, 77, 0.3);
+}
+
+.pet-btn-poke {
+  background: linear-gradient(135deg, #FCE4EC, #F8BBD0);
+  color: #8E244D;
+  box-shadow: 0 3px 8px rgba(244, 143, 177, 0.28);
 }
 
 .pet-btn-feed {

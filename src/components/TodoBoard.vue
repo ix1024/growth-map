@@ -27,11 +27,15 @@ const completionRate = computed(() => {
   return Math.round((state.selectedIds?.length / state.list?.length) * 100);
 });
 
-const canQuickComplete = computed(
+const isAllSelected = computed(
   () =>
+    state.list?.length > 0 &&
     state.list?.length === state.selectedIds?.length &&
     state.selectedIds?.length > 0,
 );
+const quickActionLabel = computed(() => {
+  return isAllSelected.value ? "一键取消" : "一键完成";
+});
 const todayRank = computed(() => resolveChallengeRank(completionRate.value));
 
 const rankHint = computed(() => {
@@ -286,7 +290,7 @@ const handleItemChange = (
   const isChecked = Boolean(checked);
   if (isChecked) {
     state.selectedIds.push(item.id);
-    !canQuickComplete.value && playCompleteSound();
+    !isAllSelected.value && playCompleteSound();
   } else {
     //移除
     state.selectedIds = state.selectedIds.filter((id) => id !== item.id);
@@ -297,8 +301,11 @@ const handleCheckboxChange = (item: TodoBoardItem, checked: unknown) => {
   handleItemChange(item, Boolean(checked));
 };
 const isReady = ref(false);
-const toggleAll = (value: boolean) => {
-  if (canQuickComplete.value && value) return;
+const toggleAll = () => {
+  if (isAllSelected.value) {
+    state.selectedIds = [];
+    return;
+  }
   state.selectedIds = state.list.map((item) => item.id);
 };
 
@@ -393,10 +400,9 @@ onBeforeUnmount(() => {
         <button
           class="quick-btn"
           type="button"
-          :disabled="canQuickComplete"
-          @click="toggleAll(true)"
+          @click="toggleAll"
         >
-          一键完成
+          {{ quickActionLabel }}
         </button>
       </div>
     </div>
