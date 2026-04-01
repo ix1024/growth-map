@@ -19,7 +19,6 @@ const STORAGE_KEY_INTIMACY = "pet-buddy-intimacy";
 const STORAGE_KEY_LAST_TOUCH = "pet-buddy-last-touch";
 const STORAGE_KEY_STREAK_DAYS = "pet-buddy-streak-days";
 const STORAGE_KEY_DAILY_EVENT = "pet-buddy-daily-event";
-const STORAGE_KEY_LAST_ESCAPE = "pet-buddy-last-escape";
 const STORAGE_KEY_LAST_CELEBRATION = "pet-buddy-last-celebration";
 
 const loadPos = (): { x: number; y: number } | null => {
@@ -98,19 +97,6 @@ const saveDailyEventDate = (dateKey: string) => {
   localStorage.setItem(STORAGE_KEY_DAILY_EVENT, dateKey);
 };
 
-const loadLastEscape = (): number => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_LAST_ESCAPE);
-    const value = Number(raw);
-    if (Number.isFinite(value)) return value;
-  } catch {}
-  return 0;
-};
-
-const saveLastEscape = (value: number) => {
-  localStorage.setItem(STORAGE_KEY_LAST_ESCAPE, String(value));
-};
-
 const loadLastCelebration = (): string => {
   try {
     return localStorage.getItem(STORAGE_KEY_LAST_CELEBRATION) || "";
@@ -145,11 +131,11 @@ const isPoking = ref(false);
 const isFeeding = ref(false);
 const isCelebrating = ref(false);
 const isSpecialAction = ref(false);
+const isDancing = ref(false);
 const taskPulse = ref(0);
 const fedAmount = ref(0);
 const intimacy = ref(loadIntimacy());
 const lastTouchAt = ref(loadLastTouch());
-const lastEscapeAt = ref(loadLastEscape());
 const bounceY = ref(0);
 const eyeBlink = ref(false);
 const petScale = ref(1);
@@ -230,61 +216,6 @@ const onPointerUp = () => {
   }
 };
 
-const escapeFromPointer = (clientX: number, clientY: number) => {
-  if (collapsed.value || isDragging.value || isPetting.value || isPoking.value || isFeeding.value) return;
-
-  const now = Date.now();
-  if (now - lastEscapeAt.value < 1800) return;
-
-  const el = containerRef.value;
-  if (!el) return;
-
-  const rect = el.getBoundingClientRect();
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
-  const dx = centerX - clientX;
-  const dy = centerY - clientY;
-  const distance = Math.hypot(dx, dy);
-
-  if (distance > 160) return;
-
-  const strength = clampNumber((160 - distance) / 160, 0.35, 1);
-  const safeDistance = Math.max(distance, 1);
-  const moveX = (dx / safeDistance) * (30 + strength * 40);
-  const moveY = (dy / safeDistance) * (18 + strength * 24);
-  const clamped = clampPos(posX.value + moveX, posY.value + moveY);
-  posX.value = clamped.x;
-  posY.value = clamped.y;
-
-  footprints.value.push({
-    x: centerX - rect.left,
-    y: centerY - rect.top,
-    opacity: 0.55,
-    size: 6 + strength * 4,
-    rotation: Math.atan2(dy, dx) + Math.PI / 2,
-    vx: (Math.random() - 0.5) * 0.5,
-    vy: -0.35 - Math.random() * 0.3,
-  });
-
-  lastEscapeAt.value = now;
-  saveLastEscape(now);
-  petState.value = intimacy.value >= 70 ? "requesting" : "shy";
-  bubbleText.value = evadeTexts[Math.floor(Math.random() * evadeTexts.length)];
-  showBubble.value = true;
-  bumpIntimacy(1);
-  markInteraction();
-
-  setTimeout(() => {
-    if (!isPetting.value && !isPoking.value && !isFeeding.value) {
-      showBubble.value = false;
-    }
-  }, 1800);
-};
-
-const onWindowPointerMove = (e: PointerEvent) => {
-  escapeFromPointer(e.clientX, e.clientY);
-};
-
 // ─── 文案 ───
 const hungryTexts = [
   "肚子好饿呀…",
@@ -333,13 +264,6 @@ const taskBoostTexts = [
   "继续加油，我会陪你一起冲！",
   "进度涨了，我也跟着开心起来了",
   "今天的节奏不错，保持住！",
-];
-
-const evadeTexts = [
-  "哎呀，别追我！",
-  "我会躲开哦~",
-  "抓不到我吧",
-  "靠太近啦，我要跑了",
 ];
 
 const dailyEvents = [
@@ -508,6 +432,12 @@ const streakRewardTexts = [
   "今天也没缺席，给你一个大大的赞",
   "这种默契我很喜欢，继续一起加油",
 ];
+const danceTexts = [
+  "跟着我一起跳起来！",
+  "今天心情太好了，跳个舞吧",
+  "转圈圈，开心一下",
+  "来一段小小的庆祝舞",
+];
 
 const loadLastSpecialAction = (): string => {
   try {
@@ -615,6 +545,56 @@ const triggerSpecialAction = () => {
   }, 1800);
 };
 
+const handleDance = () => {
+  if (isFeeding.value || isCelebrating.value || hasMoved || isDancing.value) return;
+
+  isDancing.value = true;
+  petState.value = "happy";
+  bubbleText.value = danceTexts[Math.floor(Math.random() * danceTexts.length)];
+  showBubble.value = true;
+  petScale.value = 1.12;
+  bumpIntimacy(2);
+  markInteraction();
+
+  for (let i = 0; i < 10; i += 1) {
+    hearts.value.push({
+      x: 24 + Math.random() * 72,
+      y: 12 + Math.random() * 34,
+      opacity: 1,
+      size: 10 + Math.random() * 8,
+      vy: -0.7 - Math.random() * 0.8,
+    });
+  }
+
+  const colors = ["#FFB74D", "#FF8A65", "#FFF176", "#F8BBD0", "#81D4FA"];
+  for (let i = 0; i < 14; i += 1) {
+    const angle = (Math.PI * 2 * i) / 14;
+    const speed = 1.4 + Math.random() * 2.2;
+    confetti.value.push({
+      x: 60,
+      y: 24,
+      vx: Math.cos(angle) * speed * (0.9 + Math.random() * 0.4),
+      vy: Math.sin(angle) * speed - 1.8,
+      rotation: Math.random() * Math.PI * 2,
+      vr: (Math.random() - 0.5) * 0.3,
+      size: 3.5 + Math.random() * 3.5,
+      life: 1,
+      color: colors[i % colors.length],
+    });
+  }
+
+  setTimeout(() => {
+    isDancing.value = false;
+    petScale.value = 1;
+    syncMood();
+    setTimeout(() => {
+      if (showBubble.value) {
+        showBubble.value = false;
+      }
+    }, 1800);
+  }, 1800);
+};
+
 const celebrateCompletion = () => {
   const todayKey = dayjs().format("YYYY-MM-DD");
   if (loadLastCelebration() === todayKey) return;
@@ -686,6 +666,11 @@ const syncMood = () => {
   const idleMinutes = Math.floor((Date.now() - lastTouchAt.value) / 60000);
 
   if (isCelebrating.value) {
+    petState.value = "happy";
+    return;
+  }
+
+  if (isDancing.value) {
     petState.value = "happy";
     return;
   }
@@ -819,7 +804,7 @@ let mumbleTimer: ReturnType<typeof setInterval> | null = null;
 const startMumble = () => {
   if (mumbleTimer) clearInterval(mumbleTimer);
   mumbleTimer = setInterval(() => {
-    if (isPetting.value || isFeeding.value || collapsed.value) return;
+    if (isPetting.value || isFeeding.value || isDancing.value || collapsed.value) return;
     const texts = getMoodTexts();
     bubbleText.value = texts[Math.floor(Math.random() * texts.length)];
     showBubble.value = true;
@@ -833,7 +818,7 @@ let moodTimer: ReturnType<typeof setInterval> | null = null;
 const startMoodLoop = () => {
   if (moodTimer) clearInterval(moodTimer);
   moodTimer = setInterval(() => {
-    if (!isPetting.value && !isFeeding.value) {
+    if (!isPetting.value && !isFeeding.value && !isDancing.value) {
       syncMood();
       if (
         petState.value === "requesting" &&
@@ -885,12 +870,18 @@ const animateBounce = () => {
   const t = Date.now() / 600;
   const isHappy = petState.value === "happy" || petState.value === "curious" || petState.value === "requesting";
   const isCelebratingNow = isCelebrating.value;
+  const isDancingNow = isDancing.value;
   const isSpecialActionNow = isSpecialAction.value;
   const isRequesting = petState.value === "requesting";
   const isShy = petState.value === "shy";
   const isSleepy = petState.value === "sleepy";
 
-  if (isSpecialActionNow) {
+  if (isDancingNow) {
+    const danceT = (Date.now() % 900) / 900;
+    bounceY.value = Math.sin(danceT * Math.PI * 2) * 5;
+    jumpPhase.value = danceT;
+    jumpOffsetX.value = Math.sin(danceT * Math.PI * 4) * 9;
+  } else if (isSpecialActionNow) {
     const spinT = (Date.now() % 900) / 900;
     bounceY.value = Math.sin(spinT * Math.PI * 2) * 4;
     jumpPhase.value = spinT;
@@ -973,6 +964,7 @@ const drawPet = () => {
   // 开心时落地瞬间挤压、起跳拉伸
   const isHappy = petState.value === "happy" || petState.value === "curious";
   const isCelebratingNow = isCelebrating.value;
+  const isDancingNow = isDancing.value;
   const isSpecialActionNow = isSpecialAction.value;
   const isRequesting = petState.value === "requesting";
   const isShy = petState.value === "shy";
@@ -982,7 +974,12 @@ const drawPet = () => {
   const palette = growthPalette.value;
   let scaleX = baseScale;
   let scaleY = baseScale;
-  if (isHappy || isCelebratingNow) {
+  if (isDancingNow) {
+    const jt = (Date.now() % 900) / 900;
+    const sq = 1 - Math.sin(jt * Math.PI * 2) * 0.08;
+    scaleX = baseScale * (1 + (1 - sq) * 0.55);
+    scaleY = baseScale * (1 + Math.sin(jt * Math.PI * 2) * 0.12);
+  } else if (isHappy || isCelebratingNow) {
     const jt = jumpPhase.value;
     if (jt < 0.1) {
       // 起跳蓄力：横向压扁、纵向缩短
@@ -1005,6 +1002,10 @@ const drawPet = () => {
     scaleX *= 1 + taskGlow * 0.05;
     scaleY *= 1 + taskGlow * 0.05;
   }
+  if (isDancingNow) {
+    scaleX *= 1.06;
+    scaleY *= 1.06;
+  }
   if (isSpecialActionNow) {
     scaleX *= 1.06;
     scaleY *= 1.06;
@@ -1014,7 +1015,9 @@ const drawPet = () => {
   ctx.translate(cx, cy);
 
   // 开心跳跃时微微歪头
-  if (isHappy) {
+  if (isDancingNow) {
+    ctx.rotate(Math.sin(Date.now() / 180) * 0.28);
+  } else if (isHappy) {
     const tilt = Math.sin(jumpPhase.value * Math.PI) * 0.08 * jumpDir.value;
     ctx.rotate(tilt);
     if (isRequesting) {
@@ -1037,7 +1040,13 @@ const drawPet = () => {
     ctx.lineWidth = 5;
     ctx.stroke();
   }
-  if (isSpecialActionNow) {
+  if (isDancingNow) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 52, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 105, 180, ${0.14 + Math.abs(Math.sin(Date.now() / 200)) * 0.16})`;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  } else if (isSpecialActionNow) {
     ctx.beginPath();
     ctx.arc(0, 0, 52, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(109, 76, 255, ${0.16 + Math.abs(Math.sin(Date.now() / 220)) * 0.16})`;
@@ -1045,19 +1054,25 @@ const drawPet = () => {
     ctx.stroke();
   }
 
-  const bodyColor = isHappy || isCelebratingNow
+  const bodyColor = isDancingNow
+    ? "#FFB74D"
+    : isHappy || isCelebratingNow
     ? "#FFD54F"
     : isRequesting
       ? "#FFE082"
     : palette.bodyColor;
-  const bodyGlow = isHappy || isCelebratingNow
+  const bodyGlow = isDancingNow
+    ? "#FFF176"
+    : isHappy || isCelebratingNow
     ? "#FFF176"
     : isRequesting
       ? "#FFF5C2"
       : palette.bodyGlow;
 
   // 身体阴影（跳得越高阴影越小越淡）
-  const shadowScale = isHappy || isCelebratingNow
+  const shadowScale = isDancingNow
+    ? 0.92
+    : isHappy || isCelebratingNow
     ? 1 - Math.sin(jumpPhase.value * Math.PI) * 0.3
     : isRequesting
       ? 0.98
@@ -1066,7 +1081,9 @@ const drawPet = () => {
     : isSleepy
       ? 0.92
       : 1;
-  const shadowAlpha = isHappy || isCelebratingNow
+  const shadowAlpha = isDancingNow
+    ? 0.06
+    : isHappy || isCelebratingNow
     ? 0.08 - Math.sin(jumpPhase.value * Math.PI) * 0.04
     : isRequesting
       ? 0.07
@@ -1098,7 +1115,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(-27, -30); ctx.lineTo(-33, -47); ctx.lineTo(-18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
+  ctx.fillStyle = isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   ctx.beginPath();
@@ -1109,7 +1126,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(27, -30); ctx.lineTo(33, -47); ctx.lineTo(18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
+  ctx.fillStyle = isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   // 眼睛
@@ -1119,6 +1136,12 @@ const drawPet = () => {
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(-16, -6); ctx.lineTo(-8, -6); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(8, -6); ctx.lineTo(16, -6); ctx.stroke();
+  } else if (isDancingNow) {
+    ctx.strokeStyle = "#5D4037";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(-12, -7, palette.eyeOpen, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(12, -7, palette.eyeOpen, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
   } else if (isHappy || isCelebratingNow) {
     ctx.strokeStyle = "#5D4037";
     ctx.lineWidth = palette.eyeWidth;
@@ -1160,7 +1183,7 @@ const drawPet = () => {
   }
 
   // 腮红
-  if (isHappy || isCelebratingNow || isPetting.value || isShy || isRequesting) {
+  if (isDancingNow || isHappy || isCelebratingNow || isPetting.value || isShy || isRequesting) {
     ctx.beginPath(); ctx.ellipse(-22, 4, 7, 4, 0, 0, Math.PI * 2);
     ctx.fillStyle = palette.blush; ctx.fill();
     ctx.beginPath(); ctx.ellipse(22, 4, 7, 4, 0, 0, Math.PI * 2);
@@ -1168,7 +1191,11 @@ const drawPet = () => {
   }
 
   // 嘴巴
-  if (isHappy || isCelebratingNow) {
+  if (isDancingNow) {
+    ctx.beginPath();
+    ctx.arc(0, 7, 9, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.strokeStyle = "#5D4037"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
+  } else if (isHappy || isCelebratingNow) {
     ctx.beginPath();
     if (growthStage.value === "adult") {
       ctx.arc(0, 7, 9, 0.05 * Math.PI, 0.95 * Math.PI);
@@ -1198,7 +1225,7 @@ const drawPet = () => {
   }
 
   // 胡须
-  ctx.strokeStyle = isHappy || isCelebratingNow ? "#8D6E63" : isRequesting ? "#C28B33" : palette.accent;
+  ctx.strokeStyle = isDancingNow ? "#D46B08" : isHappy || isCelebratingNow ? "#8D6E63" : isRequesting ? "#C28B33" : palette.accent;
   ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(-20, 2); ctx.lineTo(-38, -2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-20, 6); ctx.lineTo(-38, 8); ctx.stroke();
@@ -1208,7 +1235,7 @@ const drawPet = () => {
   // 尾巴
   ctx.beginPath();
   ctx.moveTo(34, 18);
-  const tailWag = Math.sin(Date.now() / 300) * (isHappy || isCelebratingNow ? 12 : isRequesting ? 6 : isShy ? 3 : isSleepy ? 1 : isBored ? 2 : 4);
+  const tailWag = Math.sin(Date.now() / 300) * (isDancingNow ? 16 : isHappy || isCelebratingNow ? 12 : isRequesting ? 6 : isShy ? 3 : isSleepy ? 1 : isBored ? 2 : 4);
   ctx.quadraticCurveTo(55 + tailWag, 0, 48 + tailWag, -20);
   ctx.strokeStyle = bodyColor; ctx.lineWidth = palette.tailWidth; ctx.lineCap = "round"; ctx.stroke();
 
@@ -1414,7 +1441,6 @@ onMounted(() => {
   animateBounce();
   drawLoop();
   syncMood();
-  window.addEventListener("pointermove", onWindowPointerMove, { passive: true });
 
   void Promise.allSettled([getEatingCount(), getTodayEatingCount()]).then(
     ([growthResult, satietyResult]) => {
@@ -1461,7 +1487,6 @@ onUnmounted(() => {
   footprints.value = [];
   confetti.value = [];
   hearts.value = [];
-  window.removeEventListener("pointermove", onWindowPointerMove);
 });
 </script>
 
@@ -1554,6 +1579,9 @@ onUnmounted(() => {
           <button class="pet-btn pet-btn-poke" @click.stop="handlePoke" :disabled="isPoking">
             👆 戳戳
           </button>
+          <button class="pet-btn pet-btn-dance" @click.stop="handleDance" :disabled="isDancing || isFeeding || isCelebrating">
+            💃 跳舞
+          </button>
           <button
             class="pet-btn pet-btn-feed"
             :class="{ disabled: !canFeed }"
@@ -1577,6 +1605,8 @@ onUnmounted(() => {
   align-items: center;
   padding: 10px;
   border-radius: 20px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
   background: linear-gradient(
     145deg,
     rgba(255, 255, 255, 0.82),
@@ -1861,6 +1891,12 @@ onUnmounted(() => {
   box-shadow: 0 3px 8px rgba(244, 143, 177, 0.28);
 }
 
+.pet-btn-dance {
+  background: linear-gradient(135deg, #E1BEE7, #BA68C8);
+  color: #4A148C;
+  box-shadow: 0 3px 8px rgba(186, 104, 200, 0.28);
+}
+
 .pet-btn-feed {
   background: linear-gradient(135deg, #A5D6A7, #66BB6A);
   color: #1B5E20;
@@ -1870,6 +1906,57 @@ onUnmounted(() => {
     background: linear-gradient(135deg, #E0E0E0, #BDBDBD);
     color: #757575;
     box-shadow: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .pet-float {
+    width: min(calc(100vw - 12px), 288px);
+    padding: 8px;
+    border-radius: 18px;
+  }
+
+  .pet-canvas {
+    width: 56px;
+    height: 56px;
+
+    &.mini {
+      width: 46px !important;
+      height: 46px !important;
+    }
+  }
+
+  .pet-info {
+    gap: 6px 8px;
+  }
+
+  .satiety-label,
+  .intimacy-label,
+  .growth-label,
+  .stage-label,
+  .streak-label,
+  .pet-status {
+    font-size: 10px;
+  }
+
+  .satiety-value,
+  .intimacy-value,
+  .growth-value,
+  .stage-value,
+  .streak-value {
+    font-size: 12px;
+  }
+
+  .pet-actions {
+    gap: 4px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .pet-btn {
+    padding: 4px 10px;
+    font-size: 11px;
   }
 }
 </style>
