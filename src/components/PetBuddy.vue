@@ -14,6 +14,8 @@ const props = defineProps<{
 // ─── localStorage 持久化工具 ───
 const STORAGE_KEY_POS = "pet-buddy-pos";
 const STORAGE_KEY_COLLAPSED = "pet-buddy-collapsed";
+const STORAGE_KEY_INTIMACY = "pet-buddy-intimacy";
+const STORAGE_KEY_LAST_TOUCH = "pet-buddy-last-touch";
 
 const loadPos = (): { x: number; y: number } | null => {
   try {
@@ -29,6 +31,35 @@ const savePos = (x: number, y: number) => {
   localStorage.setItem(STORAGE_KEY_POS, JSON.stringify({ x, y }));
 };
 
+const clampNumber = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(value, max));
+
+const loadIntimacy = (): number => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_INTIMACY);
+    const value = Number(raw);
+    if (Number.isFinite(value)) return clampNumber(Math.floor(value), 0, 100);
+  } catch {}
+  return 24;
+};
+
+const saveIntimacy = (value: number) => {
+  localStorage.setItem(STORAGE_KEY_INTIMACY, String(clampNumber(Math.floor(value), 0, 100)));
+};
+
+const loadLastTouch = (): number => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LAST_TOUCH);
+    const value = Number(raw);
+    if (Number.isFinite(value)) return value;
+  } catch {}
+  return Date.now();
+};
+
+const saveLastTouch = (value: number) => {
+  localStorage.setItem(STORAGE_KEY_LAST_TOUCH, String(value));
+};
+
 const loadCollapsed = (): boolean => {
   try {
     return localStorage.getItem(STORAGE_KEY_COLLAPSED) === "1";
@@ -39,13 +70,16 @@ const loadCollapsed = (): boolean => {
 // ─── 状态 ───
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
-const petState = ref<"hungry" | "eating" | "happy">("hungry");
+type PetMood = "hungry" | "eating" | "happy" | "curious" | "bored" | "sleepy";
+const petState = ref<PetMood>("hungry");
 const showBubble = ref(true);
 const bubbleText = ref("");
 const growthDays = ref<number | null>(null);
 const isPetting = ref(false);
 const isFeeding = ref(false);
 const fedAmount = ref(0);
+const intimacy = ref(loadIntimacy());
+const lastTouchAt = ref(loadLastTouch());
 const bounceY = ref(0);
 const eyeBlink = ref(false);
 const petScale = ref(1);
@@ -126,6 +160,28 @@ const happyTexts = [
   "你是最棒的主人！",
 ];
 
+const curiousTexts = [
+  "你终于来啦！",
+  "要不要陪我玩一会儿？",
+  "我有在偷偷等你哦",
+  "摸摸我，我会更喜欢你",
+  "今天也一起加油吧",
+];
+
+const boredTexts = [
+  "我有点无聊了…",
+  "你怎么还不来找我呀",
+  "想和你玩一会儿",
+  "我在这里等你好久了",
+];
+
+const sleepyTexts = [
+  "我有点困了…",
+  "今晚想早点休息",
+  "哈欠…还想再陪你一会儿",
+  "抱抱我，我就不困啦",
+];
+
 const pettingTexts = [
   "好舒服呀~",
   "再摸摸嘛~",
@@ -137,12 +193,83 @@ const pettingTexts = [
 const feedableAmount = computed(() => Math.floor(props.completionRate));
 const canFeed = computed(() => fedAmount.value < feedableAmount.value);
 const satiety = computed(() => fedAmount.value);
+const intimacyPercent = computed(() => intimacy.value);
 const growthDaysLabel = computed(() => {
   return growthDays.value === null ? "--" : `${growthDays.value} 天`;
 });
 
-watch(satiety, (val) => {
-  petState.value = val >= 80 ? "happy" : "hungry";
+const syncMood = () => {
+  const hour = dayjs().hour();
+  const idleMinutes = Math.floor((Date.now() - lastTouchAt.value) / 60000);
+
+  if (isFeeding.value) {
+    petState.value = "eating";
+    return;
+  }
+
+  if (satiety.value < 30) {
+    petState.value = "hungry";
+    return;
+  }
+
+  if (hour >= 23 || hour < 7) {
+    petState.value = intimacy.value >= 50 ? "sleepy" : "bored";
+    return;
+  }
+
+  if (idleMinutes >= 20) {
+    petState.value = intimacy.value >= 65 ? "curious" : "bored";
+    return;
+  }
+
+  if (satiety.value >= 80 && intimacy.value >= 70) {
+    petState.value = "happy";
+    return;
+  }
+
+  if (intimacy.value >= 40) {
+    petState.value = "curious";
+    return;
+  }
+
+  petState.value = satiety.value >= 60 ? "hungry" : "hungry";
+};
+
+const getMoodTexts = () => {
+  switch (petState.value) {
+    case "happy":
+      return happyTexts;
+    case "curious":
+      return curiousTexts;
+    case "bored":
+      return boredTexts;
+    case "sleepy":
+      return sleepyTexts;
+    case "eating":
+      return [
+        "啊呜啊呜…",
+        "好吃好吃",
+        "我正在认真吃饭",
+        "这一口很满足",
+      ];
+    default:
+      return hungryTexts;
+  }
+};
+
+const bumpIntimacy = (delta: number) => {
+  intimacy.value = clampNumber(intimacy.value + delta, 0, 100);
+  saveIntimacy(intimacy.value);
+};
+
+const markInteraction = () => {
+  lastTouchAt.value = Date.now();
+  saveLastTouch(lastTouchAt.value);
+  syncMood();
+};
+
+watch([satiety, intimacy, isFeeding], () => {
+  syncMood();
 });
 
 watch(
@@ -151,6 +278,7 @@ watch(
     if (feedableAmount.value < fedAmount.value) {
       fedAmount.value = feedableAmount.value;
     }
+    syncMood();
   },
 );
 
@@ -160,13 +288,23 @@ const startMumble = () => {
   if (mumbleTimer) clearInterval(mumbleTimer);
   mumbleTimer = setInterval(() => {
     if (isPetting.value || isFeeding.value || collapsed.value) return;
-    const texts = petState.value === "happy" ? happyTexts : hungryTexts;
+    const texts = getMoodTexts();
     bubbleText.value = texts[Math.floor(Math.random() * texts.length)];
     showBubble.value = true;
     setTimeout(() => {
       showBubble.value = false;
     }, 3000);
   }, 6000);
+};
+
+let moodTimer: ReturnType<typeof setInterval> | null = null;
+const startMoodLoop = () => {
+  if (moodTimer) clearInterval(moodTimer);
+  moodTimer = setInterval(() => {
+    if (!isPetting.value && !isFeeding.value) {
+      syncMood();
+    }
+  }, 30000);
 };
 
 // ─── 眨眼 ───
@@ -188,7 +326,8 @@ const jumpDir = ref(1); // 1=右跳，-1=左跳
 const jumpOffsetX = ref(0);
 const animateBounce = () => {
   const t = Date.now() / 600;
-  const isHappy = petState.value === "happy";
+  const isHappy = petState.value === "happy" || petState.value === "curious";
+  const isSleepy = petState.value === "sleepy";
 
   if (isHappy) {
     // 开心蹦蹦跳跳：大幅弹跳 + 左右蹦
@@ -201,6 +340,9 @@ const animateBounce = () => {
       jumpDir.value = Math.random() > 0.5 ? 1 : -1;
     }
     jumpOffsetX.value = Math.sin(jumpT * Math.PI) * 6 * jumpDir.value;
+  } else if (isSleepy) {
+    bounceY.value = Math.sin(t) * 1.2 + 1.2;
+    jumpOffsetX.value = 0;
   } else {
     // 饿的时候只有微弱呼吸
     bounceY.value = Math.sin(t) * 3;
@@ -236,7 +378,9 @@ const drawPet = () => {
   const baseScale = petScale.value * 0.62;
 
   // 开心时落地瞬间挤压、起跳拉伸
-  const isHappy = petState.value === "happy";
+  const isHappy = petState.value === "happy" || petState.value === "curious";
+  const isSleepy = petState.value === "sleepy";
+  const isBored = petState.value === "bored";
   let scaleX = baseScale;
   let scaleY = baseScale;
   if (isHappy) {
@@ -266,16 +410,34 @@ const drawPet = () => {
   if (isHappy) {
     const tilt = Math.sin(jumpPhase.value * Math.PI) * 0.08 * jumpDir.value;
     ctx.rotate(tilt);
+  } else if (isSleepy) {
+    ctx.rotate(-0.04);
   }
 
   ctx.scale(scaleX, scaleY);
 
-  const bodyColor = isHappy ? "#FFD54F" : "#E0E0E0";
-  const bodyGlow = isHappy ? "#FFF176" : "#BDBDBD";
+  const bodyColor = isHappy
+    ? "#FFD54F"
+    : isSleepy
+      ? "#D7E3FF"
+      : "#E0E0E0";
+  const bodyGlow = isHappy
+    ? "#FFF176"
+    : isSleepy
+      ? "#EEF4FF"
+      : "#BDBDBD";
 
   // 身体阴影（跳得越高阴影越小越淡）
-  const shadowScale = isHappy ? 1 - Math.sin(jumpPhase.value * Math.PI) * 0.3 : 1;
-  const shadowAlpha = isHappy ? 0.08 - Math.sin(jumpPhase.value * Math.PI) * 0.04 : 0.08;
+  const shadowScale = isHappy
+    ? 1 - Math.sin(jumpPhase.value * Math.PI) * 0.3
+    : isSleepy
+      ? 0.92
+      : 1;
+  const shadowAlpha = isHappy
+    ? 0.08 - Math.sin(jumpPhase.value * Math.PI) * 0.04
+    : isSleepy
+      ? 0.06
+      : 0.08;
   ctx.beginPath();
   ctx.ellipse(2, 42, 44 * shadowScale, 18 * shadowScale, 0, 0, Math.PI * 2);
   ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
@@ -299,7 +461,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(-27, -30); ctx.lineTo(-33, -47); ctx.lineTo(-18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy ? "#FFAB91" : "#E8A0BF";
+  ctx.fillStyle = isHappy ? "#FFAB91" : isSleepy ? "#C5CAE9" : "#E8A0BF";
   ctx.fill();
 
   ctx.beginPath();
@@ -310,7 +472,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(27, -30); ctx.lineTo(33, -47); ctx.lineTo(18, -33);
   ctx.closePath();
-  ctx.fillStyle = isHappy ? "#FFAB91" : "#E8A0BF";
+  ctx.fillStyle = isHappy ? "#FFAB91" : isSleepy ? "#C5CAE9" : "#E8A0BF";
   ctx.fill();
 
   // 眼睛
@@ -326,6 +488,12 @@ const drawPet = () => {
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.arc(-12, -6, 6, Math.PI, 0, true); ctx.stroke();
     ctx.beginPath(); ctx.arc(12, -6, 6, Math.PI, 0, true); ctx.stroke();
+  } else if (isSleepy) {
+    ctx.strokeStyle = "#5D4037";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-16, -5); ctx.lineTo(-8, -6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, -6); ctx.lineTo(16, -5); ctx.stroke();
   } else {
     ctx.beginPath(); ctx.arc(-12, -6, 5, 0, Math.PI * 2);
     ctx.fillStyle = "#5D4037"; ctx.fill();
@@ -353,6 +521,10 @@ const drawPet = () => {
   } else if (isFeeding.value) {
     ctx.beginPath(); ctx.ellipse(0, 8, 5, 6, 0, 0, Math.PI * 2);
     ctx.fillStyle = "#EF5350"; ctx.fill();
+  } else if (isSleepy) {
+    ctx.beginPath();
+    ctx.arc(0, 9, 6, 0.95 * Math.PI, 2.05 * Math.PI);
+    ctx.strokeStyle = "#8D6E63"; ctx.lineWidth = 1.6; ctx.lineCap = "round"; ctx.stroke();
   } else {
     ctx.beginPath();
     ctx.arc(0, 10, 5, 1.1 * Math.PI, 1.9 * Math.PI);
@@ -360,7 +532,7 @@ const drawPet = () => {
   }
 
   // 胡须
-  ctx.strokeStyle = isHappy ? "#8D6E63" : "#BDBDBD";
+  ctx.strokeStyle = isHappy ? "#8D6E63" : isSleepy ? "#D0D7E8" : "#BDBDBD";
   ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(-20, 2); ctx.lineTo(-38, -2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-20, 6); ctx.lineTo(-38, 8); ctx.stroke();
@@ -370,7 +542,7 @@ const drawPet = () => {
   // 尾巴
   ctx.beginPath();
   ctx.moveTo(34, 18);
-  const tailWag = Math.sin(Date.now() / 300) * (isHappy ? 12 : 4);
+  const tailWag = Math.sin(Date.now() / 300) * (isHappy ? 12 : isSleepy ? 1 : isBored ? 2 : 4);
   ctx.quadraticCurveTo(55 + tailWag, 0, 48 + tailWag, -20);
   ctx.strokeStyle = bodyColor; ctx.lineWidth = 6; ctx.lineCap = "round"; ctx.stroke();
 
@@ -388,6 +560,22 @@ const drawPet = () => {
     barGrad.addColorStop(0, "#66BB6A");
     barGrad.addColorStop(1, "#43A047");
     ctx.fillStyle = barGrad;
+    ctx.fill();
+  }
+
+  if (intimacy.value > 0) {
+    const chipW = 40;
+    const chipH = 5;
+    const chipX = -chipW / 2;
+    const chipY = 26;
+    ctx.beginPath(); ctx.roundRect(chipX, chipY, chipW, chipH, 3);
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fill();
+    const chipFill = (intimacy.value / 100) * chipW;
+    ctx.beginPath(); ctx.roundRect(chipX, chipY, chipFill, chipH, 3);
+    const chipGrad = ctx.createLinearGradient(chipX, chipY, chipX + chipFill, chipY);
+    chipGrad.addColorStop(0, "#FFB74D");
+    chipGrad.addColorStop(1, "#FF7043");
+    ctx.fillStyle = chipGrad;
     ctx.fill();
   }
 
@@ -409,8 +597,11 @@ const handlePet = () => {
   if (isFeeding.value || hasMoved) return;
   isPetting.value = true;
   petScale.value = 1.08;
+  bumpIntimacy(2);
+  markInteraction();
 
-  bubbleText.value = pettingTexts[Math.floor(Math.random() * pettingTexts.length)];
+  const petTexts = pettingTexts.concat(getMoodTexts());
+  bubbleText.value = petTexts[Math.floor(Math.random() * petTexts.length)];
   showBubble.value = true;
 
   for (let i = 0; i < 3; i++) {
@@ -426,6 +617,7 @@ const handlePet = () => {
   setTimeout(() => {
     isPetting.value = false;
     petScale.value = 1;
+    syncMood();
     setTimeout(() => { showBubble.value = false; }, 2000);
   }, 1500);
 };
@@ -447,9 +639,12 @@ const handleFeed = () => {
           fedAmount.value = Math.min(Math.max(count, 0), feedableAmount.value);
         })
         .catch(() => {});
+      bumpIntimacy(3);
+      markInteraction();
       isFeeding.value = false;
       bubbleText.value = fedAmount.value >= 80 ? "好饱！谢谢你~" : "还想再吃一点…";
       showBubble.value = true;
+      syncMood();
       setTimeout(() => { showBubble.value = false; }, 2500);
     }
   }, 150);
@@ -481,9 +676,11 @@ onMounted(() => {
   }
 
   startMumble();
+  startMoodLoop();
   startBlink();
   animateBounce();
   drawLoop();
+  syncMood();
 
   void Promise.allSettled([getEatingCount(), getTodayEatingCount()]).then(
     ([growthResult, satietyResult]) => {
@@ -503,6 +700,7 @@ onMounted(() => {
       }
 
       petState.value = fedAmount.value >= 80 ? "happy" : "hungry";
+      syncMood();
     },
   );
 
@@ -514,6 +712,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (mumbleTimer) clearInterval(mumbleTimer);
+  if (moodTimer) clearInterval(moodTimer);
   if (blinkTimer) clearInterval(blinkTimer);
   if (bounceFrame) cancelAnimationFrame(bounceFrame);
   if (drawFrame) cancelAnimationFrame(drawFrame);
@@ -565,12 +764,28 @@ onUnmounted(() => {
             <span class="satiety-label">饱食度</span>
             <span class="satiety-value">{{ satiety }}%</span>
           </div>
+          <div class="pet-intimacy">
+            <span class="intimacy-label">亲密度</span>
+            <span class="intimacy-value">{{ intimacyPercent }}%</span>
+          </div>
           <div class="pet-growth">
             <span class="growth-label">成长</span>
             <span class="growth-value">{{ growthDaysLabel }}</span>
           </div>
           <div class="pet-status" :class="petState">
-            {{ petState === 'happy' ? '😊 开心' : '😿 饿饿' }}
+            {{
+              petState === 'happy'
+                ? '😊 开心'
+                : petState === 'curious'
+                  ? '✨ 想玩'
+                  : petState === 'bored'
+                    ? '😶 无聊'
+                    : petState === 'sleepy'
+                      ? '😴 困了'
+                      : petState === 'eating'
+                        ? '🍽 吃饭中'
+                        : '😿 饿饿'
+            }}
           </div>
         </div>
 
@@ -738,6 +953,24 @@ onUnmounted(() => {
   margin-left: 4px;
 }
 
+.pet-intimacy {
+  display: inline-flex;
+  align-items: center;
+}
+
+.intimacy-label {
+  font-size: 11px;
+  color: #8D6E63;
+  font-weight: 600;
+}
+
+.intimacy-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: #D46B08;
+  margin-left: 4px;
+}
+
 .pet-growth {
   display: inline-flex;
   align-items: center;
@@ -765,6 +998,22 @@ onUnmounted(() => {
   &.happy {
     background: rgba(102, 187, 106, 0.18);
     color: #2E7D32;
+  }
+  &.curious {
+    background: rgba(255, 183, 77, 0.18);
+    color: #E65100;
+  }
+  &.bored {
+    background: rgba(189, 189, 189, 0.22);
+    color: #616161;
+  }
+  &.sleepy {
+    background: rgba(211, 226, 255, 0.4);
+    color: #3D5A80;
+  }
+  &.eating {
+    background: rgba(255, 213, 79, 0.26);
+    color: #A66A00;
   }
   &.hungry {
     background: rgba(255, 167, 38, 0.18);
