@@ -50,6 +50,13 @@ export interface MonthMaxStreakPayload {
   maxStreak?: number;
 }
 
+export interface UserTotalSumPayload {
+  userId?: string | number | null;
+  dailyPointsTotal?: number;
+  extraPointsTotal?: number;
+  consumedPointsTotal?: number;
+}
+
 export interface EatingCountPayload {
   eatingCount?: number;
   eating_count?: number;
@@ -134,6 +141,10 @@ export const updateAttitudePoints = (payload: {
   attitudePoints: number;
 }) => {
   return http.put<DailyPointRecord>("/daily-points/attitude", payload);
+};
+
+export const getUserTotalSum = () => {
+  return http.get<UserTotalSumPayload>("/daily-points/user-total-sum");
 };
 
 export const getTodayEatingCount = () => {

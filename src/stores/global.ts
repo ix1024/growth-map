@@ -1,17 +1,11 @@
 import { defineStore } from "pinia";
 import dayjs from "dayjs";
 import { checkAuth } from "@/api/auth";
-import { getDailyPoints } from "@/api/dailyPoints";
+import { getDailyPoints, getUserTotalSum } from "@/api/dailyPoints";
 import { getExtraPoints } from "@/api/extraPoints";
-import {
-  getPointsConsumption,
-  getPointsConsumptionSum,
-} from "@/api/pointsConsumptions";
+import { getPointsConsumption } from "@/api/pointsConsumptions";
 import { getSystemConfigs } from "@/api/systemConfig";
-import {
-  clearAuthSession,
-  saveCheckedAuthUser,
-} from "@/utils/authSession";
+import { clearAuthSession, saveCheckedAuthUser } from "@/utils/authSession";
 import { KidTheme } from "@/views/index.vue";
 
 type PointsBucket = {
@@ -46,10 +40,8 @@ export const useGStore = defineStore("g", {
     },
     async update() {
       await Promise.all([
-        this.getAllDailyPoints(),
+        this.getUserTotalSummary(),
         this.getDayliyPoints(),
-        this.getTotalConsumedPoints(),
-        this.getTotalExtraPoints(),
         this.getConfig(),
       ]);
     },
@@ -88,11 +80,15 @@ export const useGStore = defineStore("g", {
       }
     },
 
-    async getTotalConsumedPoints() {
+    async getUserTotalSummary() {
       try {
-        const data = await getPointsConsumptionSum();
-        this.totalConsumedPoints = Number(data?.totalConsumedPoints || 0);
+        const data = await getUserTotalSum();
+        this.totalPoints = Number(data?.dailyPointsTotal || 0);
+        this.totalExtraPoints = Number(data?.extraPointsTotal || 0);
+        this.totalConsumedPoints = Number(data?.consumedPointsTotal || 0);
       } catch {
+        this.totalPoints = 0;
+        this.totalExtraPoints = 0;
         this.totalConsumedPoints = 0;
       }
     },
@@ -211,33 +207,6 @@ export const useGStore = defineStore("g", {
       }
     },
 
-    async getAllDailyPoints() {
-      try {
-        const dailyData = await getDailyPoints();
-        const allDaily = Array.isArray(dailyData?.list) ? dailyData.list : [];
-        this.totalPoints = allDaily.reduce(
-          (sum, item) => sum + Number(item.points || 0),
-          0,
-        );
-        this.totalAttitudePoints = allDaily.reduce(
-          (sum, item) => sum + Number(item.attitudePoints || 0),
-          0,
-        );
-      } catch {
-        this.totalPoints = 0;
-        this.totalAttitudePoints = 0;
-      }
-    },
-
-    async getTotalExtraPoints() {
-      try {
-        const data = await getExtraPoints();
-        this.totalExtraPoints = Number(data?.totalPoints || 0);
-      } catch {
-        this.totalExtraPoints = 0;
-      }
-    },
-
     async getConfig() {
       try {
         const data = await getSystemConfigs();
@@ -249,9 +218,7 @@ export const useGStore = defineStore("g", {
   },
   getters: {
     totalScore(state) {
-      return (
-        state.totalPoints + state.totalAttitudePoints + state.totalExtraPoints
-      );
+      return state.totalPoints + state.totalExtraPoints;
     },
     weeklyTotalPoints(state) {
       return Object.values(state.weeklyPoints).reduce(
@@ -268,12 +235,7 @@ export const useGStore = defineStore("g", {
       );
     },
     availablePoints(state) {
-      return (
-        state.totalPoints +
-        state.totalAttitudePoints +
-        state.totalExtraPoints -
-        state.totalConsumedPoints
-      );
+      return state.totalPoints + state.totalExtraPoints - state.totalConsumedPoints;
     },
   },
 });

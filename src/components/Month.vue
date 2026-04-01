@@ -21,6 +21,9 @@ const dayCells = computed(() => {
 const monthTotalScore = computed(() => {
   return dayCells.value.reduce((sum, day) => sum + getDayTotalScore(day), 0);
 });
+const availableAchievementPoints = computed(() =>
+  Math.max(Number(g.availablePoints || 0), 0),
+);
 const requiredCheckinDays = computed(
   () => MONTHLY_ACHIEVEMENT_CONFIG.requiredStreakDays,
 );
@@ -34,14 +37,17 @@ const isContinuousCheckin = computed(() => {
 const monthlyCompletionPercent = computed(() => {
   const target = MONTHLY_ACHIEVEMENT_CONFIG.targetPoints;
   if (target <= 0) return 0;
-  return (monthTotalScore.value / target) * 100;
+  return (availableAchievementPoints.value / target) * 100;
 });
 const rewardStatusList = computed(() =>
   MONTHLY_ACHIEVEMENT_CONFIG.rewards.map((rule) => {
     const targetPoints = Math.ceil(
       (MONTHLY_ACHIEVEMENT_CONFIG.targetPoints * rule.percent) / 100,
     );
-    const remainingPoints = Math.max(targetPoints - monthTotalScore.value, 0);
+    const remainingPoints = Math.max(
+      targetPoints - availableAchievementPoints.value,
+      0,
+    );
     return {
       ...rule,
       targetPoints,
@@ -157,7 +163,7 @@ watch(dailyPointsRefreshKey, () => {
     </div>
     <div class="achievement-box">
       <div class="achievement-title">
-        成就目标：本月积分目标 {{ MONTHLY_ACHIEVEMENT_CONFIG.targetPoints }} 分
+        成就目标：可用积分目标 {{ MONTHLY_ACHIEVEMENT_CONFIG.targetPoints }} 分
       </div>
       <div class="achievement-rows">
         <div class="achievement-item">
@@ -167,9 +173,9 @@ watch(dailyPointsRefreshKey, () => {
           </strong>
         </div>
         <div class="achievement-item">
-          <span>积分进度</span>
+          <span>可用积分</span>
           <strong :class="{ ok: monthlyCompletionPercent >= 100 }">
-            {{ monthTotalScore }}/{{
+            {{ availableAchievementPoints }}/{{
               MONTHLY_ACHIEVEMENT_CONFIG.targetPoints
             }}
             （{{ monthlyCompletionPercent.toFixed(1) }}%）
