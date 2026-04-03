@@ -86,10 +86,12 @@ export const useGStore = defineStore("g", {
         this.totalPoints = Number(data?.dailyPointsTotal || 0);
         this.totalExtraPoints = Number(data?.extraPointsTotal || 0);
         this.totalConsumedPoints = Number(data?.consumedPointsTotal || 0);
+        this.totalAttitudePoints = Number(data?.attitudePoints || 0);
       } catch {
         this.totalPoints = 0;
         this.totalExtraPoints = 0;
         this.totalConsumedPoints = 0;
+        this.totalAttitudePoints = 0;
       }
     },
 
@@ -218,7 +220,7 @@ export const useGStore = defineStore("g", {
   },
   getters: {
     totalScore(state) {
-      return state.totalPoints + state.totalExtraPoints;
+      return state.totalPoints + state.totalExtraPoints + state.totalAttitudePoints;
     },
     weeklyTotalPoints(state) {
       return Object.values(state.weeklyPoints).reduce(
@@ -235,7 +237,7 @@ export const useGStore = defineStore("g", {
       );
     },
     availablePoints(state) {
-      return state.totalPoints + state.totalExtraPoints - state.totalConsumedPoints;
+      return state.totalPoints + state.totalExtraPoints + state.totalAttitudePoints - state.totalConsumedPoints;
     },
   },
 });

@@ -56,6 +56,7 @@ export interface UserTotalSumPayload {
   dailyPointsTotal?: number;
   extraPointsTotal?: number;
   consumedPointsTotal?: number;
+  attitudePoints?: number;
 }
 
 export interface EatingCountPayload {
