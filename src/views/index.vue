@@ -69,8 +69,15 @@ const handleLoginSuccess = async () => {
 
 onMounted(async () => {
   await g.checkAuthStatus();
-  applyTheme(g.theme);
 });
+
+watch(
+  () => g.theme,
+  (theme) => {
+    applyTheme(theme);
+  },
+  { immediate: true },
+);
 
 watchEffect(() => {
   document.title = pageTitle.value;

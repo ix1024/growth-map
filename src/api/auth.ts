@@ -24,10 +24,29 @@ export interface CaptchaPayload {
   captchaImage: string;
 }
 
+const themeAliases: Record<string, string> = {
+  candy: "candy",
+  ocean: "ocean",
+  rainbow: "rainbow",
+  eggparty: "eggparty",
+  糖果风: "candy",
+  海洋风: "ocean",
+  海洋风格: "ocean",
+  彩虹风: "rainbow",
+  蛋仔派对: "eggparty",
+};
+
 const normalizeOptionalNumber = (value: unknown) => {
   if (value === undefined || value === null || value === "") return undefined;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : undefined;
+};
+
+const normalizeTheme = (value: unknown) => {
+  if (typeof value !== "string") return undefined;
+  const key = value.trim();
+  if (!key) return undefined;
+  return themeAliases[key] || themeAliases[key.toLowerCase()];
 };
 
 const normalizeAuthUser = (value: unknown): AuthUser | undefined => {
@@ -52,7 +71,7 @@ const normalizeAuthUser = (value: unknown): AuthUser | undefined => {
     birthDate: typeof record.birthDate === "string" ? record.birthDate : "",
     avatar: typeof record.avatar === "string" ? record.avatar : "",
     level: Number(record.level ?? 1),
-    theme: record.theme,
+    theme: normalizeTheme(record.theme),
     isAdmin: Number(record.isAdmin ?? 0),
   };
 };

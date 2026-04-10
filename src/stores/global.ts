@@ -15,9 +15,29 @@ type PointsBucket = {
   consumedPoints: number;
 };
 
+const defaultTheme: KidTheme = "eggparty";
+const themeAliases: Record<string, KidTheme> = {
+  candy: "candy",
+  ocean: "ocean",
+  rainbow: "rainbow",
+  eggparty: "eggparty",
+  糖果风: "candy",
+  海洋风: "ocean",
+  海洋风格: "ocean",
+  彩虹风: "rainbow",
+  蛋仔派对: "eggparty",
+};
+
+const resolveTheme = (value: unknown): KidTheme => {
+  if (typeof value !== "string") return defaultTheme;
+  const key = value.trim();
+  if (!key) return defaultTheme;
+  return themeAliases[key] || themeAliases[key.toLowerCase()] || defaultTheme;
+};
+
 export const useGStore = defineStore("g", {
   state: () => ({
-    theme: "eggparty" as KidTheme,
+    theme: defaultTheme,
     loading: false,
     hasCheckedAuth: false,
     loggedIn: false,
@@ -54,16 +74,19 @@ export const useGStore = defineStore("g", {
         if (result.loggedIn && result.user) {
           this.loggedIn = true;
           this.userInfo = result.user as any;
+          this.theme = resolveTheme(result.user.theme);
           saveCheckedAuthUser(result.user);
           await this.init();
         } else {
           this.loggedIn = false;
           this.userInfo = {};
+          this.theme = defaultTheme;
           clearAuthSession();
         }
       } catch {
         this.loggedIn = false;
         this.userInfo = {};
+        this.theme = defaultTheme;
         clearAuthSession();
       } finally {
         this.loading = false;
@@ -75,7 +98,7 @@ export const useGStore = defineStore("g", {
       const result = await checkAuth();
       if (result.loggedIn && result.user) {
         this.userInfo = result.user as any;
-        result.user.theme ? (this.theme = result.user.theme) : null;
+        this.theme = resolveTheme(result.user.theme);
         saveCheckedAuthUser(result.user);
       }
     },
