@@ -25,17 +25,24 @@ const themeOptions: Array<{ label: string; value: KidTheme }> = [
   { label: "蛋仔派对", value: "eggparty" },
 ];
 const showAddDialog = ref(false);
-const addValue = ref(1);
+const addValue = ref<number | undefined>(undefined);
 const consumeRemark = ref("");
 const consumeSubmitting = ref(false);
+const consumeMode = ref<"custom" | "quick">("custom");
 const consumeQuickOptions = [
   { label: "看电视", points: 100 },
+  { label: "看电视", points: 200 },
+  { label: "看电视", points: 300 },
+  { label: "看电视", points: 400 },
+  { label: "看电视", points: 500 },
+  { label: "看电视", points: 600 },
   { label: "玩手机", points: 200 },
 ] as const;
 const showExtraDialog = ref(false);
-const extraPointsValue = ref(1);
+const extraPointsValue = ref<number | undefined>(undefined);
 const extraRemark = ref("");
 const extraSubmitting = ref(false);
+const extraMode = ref<"custom" | "quick">("custom");
 const extraQuickOptions = [
   { label: "不挑食", points: 5, remark: "不挑食" },
   { label: "喝汤", points: 5, remark: "喝汤" },
@@ -43,6 +50,11 @@ const extraQuickOptions = [
   { label: "做家务", points: 5, remark: "做家务" },
   { label: "普通运行", points: 5, remark: "普通运行" },
   { label: "出汗运行", points: 10, remark: "出汗运行" },
+  { label: "优秀奖", points: 100, remark: "优秀奖" },
+  { label: "三等奖", points: 200, remark: "三等奖" },
+  { label: "二等奖", points: 300, remark: "二等奖" },
+  { label: "一等奖", points: 500, remark: "一等奖" },
+  { label: "特等奖", points: 800, remark: "特等奖" },
 ] as const;
 
 const pageTitle = computed(() => {
@@ -89,15 +101,25 @@ watchEffect(() => {
 
 const handleOpenAddDialog = () => {
   showAddDialog.value = true;
+  consumeMode.value = "custom";
+  addValue.value = undefined;
+  consumeRemark.value = "";
 };
 
 const handleCancelAdd = () => {
   showAddDialog.value = false;
 };
 
+const applyConsumeCustomOption = () => {
+  consumeMode.value = "custom";
+  addValue.value = undefined;
+  consumeRemark.value = "";
+};
+
 const applyConsumeQuickOption = (
   option: (typeof consumeQuickOptions)[number],
 ) => {
+  consumeMode.value = "quick";
   addValue.value = option.points;
   consumeRemark.value = option.label;
 };
@@ -132,10 +154,19 @@ const handleConfirmAdd = async () => {
 
 const handleOpenExtraDialog = () => {
   showExtraDialog.value = true;
+  extraMode.value = "custom";
+  extraPointsValue.value = undefined;
+  extraRemark.value = "";
 };
 
 const handleCancelExtra = () => {
   showExtraDialog.value = false;
+  extraRemark.value = "";
+};
+
+const applyExtraCustomOption = () => {
+  extraMode.value = "custom";
+  extraPointsValue.value = undefined;
   extraRemark.value = "";
 };
 
@@ -167,6 +198,7 @@ const handleConfirmExtra = async () => {
 };
 
 const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
+  extraMode.value = "quick";
   extraPointsValue.value = option.points;
   extraRemark.value = option.remark;
 };
@@ -236,13 +268,22 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
       <div class="add-dialog-body add-dialog-body-extra">
         <div class="extra-quick-grid">
           <button
+            type="button"
+            :class="['extra-quick-btn', { active: consumeMode === 'custom' }]"
+            @click="applyConsumeCustomOption"
+          >
+            自定义
+          </button>
+          <button
             v-for="option in consumeQuickOptions"
-            :key="option.label"
+            :key="`${option.label}-${option.points}`"
             type="button"
             :class="[
               'extra-quick-btn',
               {
+                disabled: consumeMode === 'quick' && addValue !== option.points,
                 active:
+                  consumeMode === 'quick' &&
                   addValue === option.points &&
                   consumeRemark.trim() === option.label,
               },
@@ -259,6 +300,8 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           :step="1"
           controls-position="right"
           size="large"
+          placeholder="请输入消耗积分"
+          :disabled="consumeMode === 'quick'"
         />
         <el-input
           v-model="consumeRemark"
@@ -266,6 +309,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           show-word-limit
           clearable
           placeholder="备注（必填）"
+          :disabled="consumeMode === 'quick'"
         />
       </div>
       <div class="add-dialog-footer">
@@ -291,13 +335,22 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
       <div class="add-dialog-body add-dialog-body-extra">
         <div class="extra-quick-grid">
           <button
+            type="button"
+            :class="['extra-quick-btn', { active: extraMode === 'custom' }]"
+            @click="applyExtraCustomOption"
+          >
+            自定义
+          </button>
+          <button
             v-for="option in extraQuickOptions"
-            :key="option.label"
+            :key="`${option.label}-${option.points}`"
             type="button"
             :class="[
               'extra-quick-btn',
               {
+                disabled: extraMode === 'quick' && extraPointsValue !== option.points,
                 active:
+                  extraMode === 'quick' &&
                   extraPointsValue === option.points &&
                   extraRemark.trim() === option.remark,
               },
@@ -314,6 +367,8 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           :step="1"
           controls-position="right"
           size="large"
+          placeholder="请输入奖励积分"
+          :disabled="extraMode === 'quick'"
         />
         <el-input
           v-model="extraRemark"
@@ -321,6 +376,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           show-word-limit
           clearable
           placeholder="备注（必填）"
+          :disabled="extraMode === 'quick'"
         />
       </div>
       <div class="add-dialog-footer">
