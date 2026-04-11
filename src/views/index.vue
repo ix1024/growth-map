@@ -28,6 +28,10 @@ const showAddDialog = ref(false);
 const addValue = ref(1);
 const consumeRemark = ref("");
 const consumeSubmitting = ref(false);
+const consumeQuickOptions = [
+  { label: "看电视", points: 100 },
+  { label: "玩手机", points: 200 },
+] as const;
 const showExtraDialog = ref(false);
 const extraPointsValue = ref(1);
 const extraRemark = ref("");
@@ -89,6 +93,13 @@ const handleOpenAddDialog = () => {
 
 const handleCancelAdd = () => {
   showAddDialog.value = false;
+};
+
+const applyConsumeQuickOption = (
+  option: (typeof consumeQuickOptions)[number],
+) => {
+  addValue.value = option.points;
+  consumeRemark.value = option.label;
 };
 
 const handleConfirmAdd = async () => {
@@ -223,6 +234,24 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
       class="add-dialog"
     >
       <div class="add-dialog-body add-dialog-body-extra">
+        <div class="extra-quick-grid">
+          <button
+            v-for="option in consumeQuickOptions"
+            :key="option.label"
+            type="button"
+            :class="[
+              'extra-quick-btn',
+              {
+                active:
+                  addValue === option.points &&
+                  consumeRemark.trim() === option.label,
+              },
+            ]"
+            @click="applyConsumeQuickOption(option)"
+          >
+            {{ option.label }} -{{ option.points }}
+          </button>
+        </div>
         <el-input-number
           v-model="addValue"
           :min="1"
