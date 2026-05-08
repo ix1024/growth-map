@@ -1385,28 +1385,26 @@ const handleFeed = () => {
   if (!canFeed.value || isFeeding.value) return;
   isFeeding.value = true;
 
-  const step = Math.min(10, feedableAmount.value - fedAmount.value);
-  let fed = 0;
-  const feedInterval = setInterval(() => {
-    fed++;
-    fedAmount.value = Math.min(fedAmount.value + 1, feedableAmount.value);
-    if (fed >= step || fedAmount.value >= feedableAmount.value) {
-      clearInterval(feedInterval);
-      void updateTodayEatingCount({ eating: fedAmount.value })
-        .then((count) => {
-          fedAmount.value = Math.min(Math.max(count, 0), feedableAmount.value);
-          void refreshMonthlyEatingStreak();
-        })
-        .catch(() => {});
+  const targetAmount = feedableAmount.value;
+  fedAmount.value = targetAmount;
+
+  void updateTodayEatingCount({ eating: targetAmount })
+    .then((count) => {
+      fedAmount.value = Math.min(Math.max(count, 0), feedableAmount.value);
+      void refreshMonthlyEatingStreak();
+    })
+    .catch(() => {})
+    .finally(() => {
       bumpIntimacy(3);
-      isFeeding.value = false;
       bubbleText.value = fedAmount.value >= 80 ? "好饱！谢谢你~" : "还想再吃一点…";
       showBubble.value = true;
       markInteraction();
       syncMood();
-      setTimeout(() => { showBubble.value = false; }, 2500);
-    }
-  }, 150);
+      setTimeout(() => {
+        showBubble.value = false;
+      }, 2500);
+      isFeeding.value = false;
+    });
 };
 
 // ─── 折叠/展开 ───
