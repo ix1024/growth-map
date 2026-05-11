@@ -475,7 +475,7 @@ const growthDaysLabel = computed(() => {
   return growthDays.value === null ? "--" : `${growthDays.value} 天`;
 });
 const isDead = computed(() => deadDays.value >= 1);
-const reviveCost = computed(() => Math.max(deadDays.value, 0) * 10);
+const reviveCost = computed(() => Math.max(deadDays.value, 0) * 50);
 const canRevive = computed(() => g.availablePoints >= reviveCost.value);
 
 const streakMilestones = [3, 7, 14, 30];
@@ -549,6 +549,21 @@ const computeLatestCheckinDate = (
   return activeDates[activeDates.length - 1] || "";
 };
 
+const hasAnyCheckin = (
+  list: Array<{
+    points?: number;
+    attitudePoints?: number;
+    extraPoints?: number;
+  }>,
+) => {
+  return list.some(
+    (record) =>
+      Number(record.points ?? 0) > 0 ||
+      Number(record.attitudePoints ?? 0) > 0 ||
+      Number(record.extraPoints ?? 0) > 0,
+  );
+};
+
 const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: number }>) => {
   monthlyDailyPoints.value = list;
   const nextStreak = computeEatingStreak(list);
@@ -556,17 +571,20 @@ const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: 
   streakDays.value = nextStreak;
   saveStreakDays(nextStreak);
 
-  const lastCheckinDate = computeLatestCheckinDate(
-    list as Array<{
-      recordDate: string;
-      points?: number;
-      attitudePoints?: number;
-      extraPoints?: number;
-    }>,
-  );
+  const checkinList = list as Array<{
+    recordDate: string;
+    points?: number;
+    attitudePoints?: number;
+    extraPoints?: number;
+  }>;
+  const lastCheckinDate = computeLatestCheckinDate(checkinList);
   if (lastCheckinDate) {
     lastFeedDate.value = lastCheckinDate;
     saveLastFeedDate(lastCheckinDate);
+  } else if (!hasAnyCheckin(checkinList)) {
+    const yesterdayKey = dayjs().subtract(1, "day").format("YYYY-MM-DD");
+    lastFeedDate.value = yesterdayKey;
+    saveLastFeedDate(yesterdayKey);
   }
   syncDeathState();
 
@@ -1686,7 +1704,7 @@ onUnmounted(() => {
     <div
       ref="containerRef"
       class="pet-float"
-      :class="{ collapsed, dragging: isDragging }"
+      :class="{ collapsed, dragging: isDragging, dead: isDead }"
       :style="{ left: posX + 'px', top: posY + 'px' }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
@@ -1721,6 +1739,12 @@ onUnmounted(() => {
           @click="handlePet"
         />
 
+        <div v-if="isDead" class="pet-dead-banner">
+          <div class="pet-dead-title">☠️ 宠物已死亡</div>
+          <div class="pet-dead-desc">连续 {{ deadDays }} 天没有喂食</div>
+          <div class="pet-dead-cost">复活需要 {{ reviveCost }} 积分</div>
+        </div>
+
         <div class="pet-info">
           <div class="pet-satiety">
             <span class="satiety-label">饱食度</span>
@@ -1745,7 +1769,7 @@ onUnmounted(() => {
           <div class="pet-status" :class="petState">
             {{
               petState === 'dead'
-                ? '💀 死亡'
+                ? '☠️ 已死亡'
                 : petState === 'happy'
                 ? '😊 开心'
                 : petState === 'curious'
@@ -1781,7 +1805,7 @@ onUnmounted(() => {
             @click.stop="handleFeed"
             :disabled="(isDead ? !canRevive : !canFeed) || isFeeding || isReviving"
           >
-            {{ isDead ? `💊 复活 ${reviveCost}` : "🍖 喂食" }}
+            {{ isDead ? `💊 复活 ${reviveCost} 分` : "🍖 喂食" }}
           </button>
         </div>
       </template>
@@ -1812,11 +1836,42 @@ onUnmounted(() => {
   cursor: grab;
   touch-action: none;
   user-select: none;
+  overflow: hidden;
   transition: box-shadow 0.2s ease, border-radius 0.3s ease, padding 0.3s ease;
 
   &.dragging {
     cursor: grabbing;
     box-shadow: 0 12px 36px rgba(31, 41, 55, 0.22);
+  }
+
+  &.dead {
+    border-color: rgba(239, 68, 68, 0.22);
+    box-shadow: 0 8px 28px rgba(31, 41, 55, 0.14);
+
+    .pet-toggle {
+      background: rgba(239, 68, 68, 0.12);
+      color: #b91c1c;
+    }
+
+    .pet-canvas {
+      filter: grayscale(1) contrast(0.95) brightness(0.82);
+    }
+
+    .pet-dead-banner {
+      border-color: rgba(239, 68, 68, 0.18);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(254, 242, 242, 0.96));
+    }
+
+    .pet-status.dead {
+      background: rgba(254, 226, 226, 0.95);
+      color: #b91c1c;
+    }
+
+    .pet-btn-feed {
+      background: linear-gradient(135deg, #FEE2E2, #FCA5A5);
+      color: #991b1b;
+      box-shadow: 0 3px 8px rgba(239, 68, 68, 0.16);
+    }
   }
 
   &.collapsed {
@@ -1913,6 +1968,39 @@ onUnmounted(() => {
   }
 
   &:active { transform: scale(0.96); }
+}
+
+.pet-dead-banner {
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 248, 248, 0.98));
+  border: 1px solid rgba(239, 68, 68, 0.14);
+  color: #7f1d1d;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.pet-dead-title {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.pet-dead-desc {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(127, 29, 29, 0.7);
+}
+
+.pet-dead-cost {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #b91c1c;
 }
 
 .pet-info {
