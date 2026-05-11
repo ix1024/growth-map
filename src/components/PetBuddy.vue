@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import dayjs from "dayjs";
+import { ElMessage } from "element-plus";
 import { getEatingCount } from "@/api/pet";
 import {
   getDailyPoints,
   getTodayEatingCount,
   updateTodayEatingCount,
 } from "@/api/dailyPoints";
+import { createPointsConsumption } from "@/api/pointsConsumptions";
+import { useGStore } from "@/stores/global";
 
 const props = defineProps<{
   /** 待办完成率 0-100 */
   completionRate: number;
 }>();
+const g = useGStore();
 
 // ─── localStorage 持久化工具 ───
 const STORAGE_KEY_POS = "pet-buddy-pos";
@@ -20,6 +24,7 @@ const STORAGE_KEY_LAST_TOUCH = "pet-buddy-last-touch";
 const STORAGE_KEY_STREAK_DAYS = "pet-buddy-streak-days";
 const STORAGE_KEY_DAILY_EVENT = "pet-buddy-daily-event";
 const STORAGE_KEY_LAST_CELEBRATION = "pet-buddy-last-celebration";
+const STORAGE_KEY_LAST_FEED_DATE = "pet-buddy-last-feed-date";
 
 const loadPos = (): { x: number; y: number } | null => {
   try {
@@ -115,20 +120,59 @@ const loadCollapsed = (): boolean => {
   return false;
 };
 
+const loadLastFeedDate = (): string => {
+  try {
+    return localStorage.getItem(STORAGE_KEY_LAST_FEED_DATE) || "";
+  } catch {}
+  return "";
+};
+
+const saveLastFeedDate = (dateKey: string) => {
+  localStorage.setItem(STORAGE_KEY_LAST_FEED_DATE, dateKey);
+};
+
+const syncDeathState = () => {
+  const todayKey = dayjs().format("YYYY-MM-DD");
+  const storedDate = lastFeedDate.value.trim();
+  if (!storedDate) {
+    lastFeedDate.value = todayKey;
+    saveLastFeedDate(todayKey);
+    deadDays.value = 0;
+    return;
+  }
+
+  const diffDays = Math.max(0, dayjs(todayKey).diff(dayjs(storedDate), "day"));
+  deadDays.value = diffDays;
+  if (diffDays <= 0) {
+    saveLastFeedDate(todayKey);
+    lastFeedDate.value = todayKey;
+  }
+};
+
+const markFedToday = () => {
+  const todayKey = dayjs().format("YYYY-MM-DD");
+  lastFeedDate.value = todayKey;
+  saveLastFeedDate(todayKey);
+  deadDays.value = 0;
+};
+
 // ─── 状态 ───
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLElement | null>(null);
 type PetMood = "hungry" | "eating" | "happy" | "curious" | "bored" | "sleepy" | "shy" | "requesting";
 type GrowthStage = "baby" | "child" | "teen" | "adult";
-const petState = ref<PetMood>("hungry");
+const petState = ref<PetMood | "dead">("hungry");
 const showBubble = ref(true);
 const bubbleText = ref("");
 const growthDays = ref<number | null>(null);
 const streakDays = ref(loadStreakDays());
 const monthlyDailyPoints = ref<Array<{ recordDate: string; eating?: number }>>([]);
+const lastFeedDate = ref(loadLastFeedDate());
+const deadDays = ref(0);
 const isPetting = ref(false);
 const isPoking = ref(false);
 const isFeeding = ref(false);
+const isReviving = ref(false);
 const isCelebrating = ref(false);
 const isSpecialAction = ref(false);
 const isDancing = ref(false);
@@ -234,6 +278,13 @@ const happyTexts = [
   "谢谢你喂我！",
   "幸福感爆棚！",
   "你是最棒的主人！",
+];
+
+const deadTexts = [
+  "我已经倒下了…快用积分救我",
+  "我需要复活，拜托你了",
+  "今天没被养到，我快不行了",
+  "先复活我，再继续陪我吧",
 ];
 
 const curiousTexts = [
@@ -423,6 +474,9 @@ const streakLabel = computed(() => `${streakDays.value} 天`);
 const growthDaysLabel = computed(() => {
   return growthDays.value === null ? "--" : `${growthDays.value} 天`;
 });
+const isDead = computed(() => deadDays.value >= 1);
+const reviveCost = computed(() => Math.max(deadDays.value, 0) * 10);
+const canRevive = computed(() => g.availablePoints >= reviveCost.value);
 
 const streakMilestones = [3, 7, 14, 30];
 const specialActionKey = "pet-buddy-last-special-action";
@@ -546,7 +600,7 @@ const triggerSpecialAction = () => {
 };
 
 const handleDance = () => {
-  if (isFeeding.value || isCelebrating.value || hasMoved || isDancing.value) return;
+  if (isDead.value || isFeeding.value || isReviving.value || isCelebrating.value || hasMoved || isDancing.value) return;
 
   isDancing.value = true;
   petState.value = "happy";
@@ -662,6 +716,11 @@ const celebrateCompletion = () => {
 };
 
 const syncMood = () => {
+  syncDeathState();
+  if (isDead.value) {
+    petState.value = "dead";
+    return;
+  }
   const hour = dayjs().hour();
   const idleMinutes = Math.floor((Date.now() - lastTouchAt.value) / 60000);
 
@@ -720,6 +779,8 @@ const syncMood = () => {
 
 const getMoodTexts = () => {
   switch (petState.value) {
+    case "dead":
+      return deadTexts;
     case "happy":
       return happyTexts;
     case "curious":
@@ -868,6 +929,33 @@ const jumpDir = ref(1); // 1=右跳，-1=左跳
 const jumpOffsetX = ref(0);
 const animateBounce = () => {
   const t = Date.now() / 600;
+  if (isDead.value) {
+    bounceY.value = Math.sin(t) * 0.8;
+    jumpOffsetX.value = Math.sin(t * 0.5) * 0.8;
+    hearts.value = hearts.value
+      .map((h) => ({ ...h, y: h.y + h.vy, opacity: h.opacity - 0.012 }))
+      .filter((h) => h.opacity > 0);
+    confetti.value = confetti.value
+      .map((p) => ({
+        ...p,
+        x: p.x + p.vx,
+        y: p.y + p.vy,
+        vy: p.vy + 0.08,
+        rotation: p.rotation + p.vr,
+        life: p.life - 0.015,
+      }))
+      .filter((p) => p.life > 0);
+    footprints.value = footprints.value
+      .map((f) => ({
+        ...f,
+        x: f.x + f.vx,
+        y: f.y + f.vy,
+        opacity: f.opacity - 0.015,
+      }))
+      .filter((f) => f.opacity > 0);
+    bounceFrame = requestAnimationFrame(animateBounce);
+    return;
+  }
   const isHappy = petState.value === "happy" || petState.value === "curious" || petState.value === "requesting";
   const isCelebratingNow = isCelebrating.value;
   const isDancingNow = isDancing.value;
@@ -966,6 +1054,7 @@ const drawPet = () => {
   const isCelebratingNow = isCelebrating.value;
   const isDancingNow = isDancing.value;
   const isSpecialActionNow = isSpecialAction.value;
+  const isDeadNow = isDead.value;
   const isRequesting = petState.value === "requesting";
   const isShy = petState.value === "shy";
   const isSleepy = petState.value === "sleepy";
@@ -1015,7 +1104,9 @@ const drawPet = () => {
   ctx.translate(cx, cy);
 
   // 开心跳跃时微微歪头
-  if (isDancingNow) {
+  if (isDeadNow) {
+    ctx.rotate(-0.08);
+  } else if (isDancingNow) {
     ctx.rotate(Math.sin(Date.now() / 180) * 0.28);
   } else if (isHappy) {
     const tilt = Math.sin(jumpPhase.value * Math.PI) * 0.08 * jumpDir.value;
@@ -1054,14 +1145,18 @@ const drawPet = () => {
     ctx.stroke();
   }
 
-  const bodyColor = isDancingNow
+  const bodyColor = isDeadNow
+    ? "#C7CEDB"
+    : isDancingNow
     ? "#FFB74D"
     : isHappy || isCelebratingNow
     ? "#FFD54F"
     : isRequesting
       ? "#FFE082"
     : palette.bodyColor;
-  const bodyGlow = isDancingNow
+  const bodyGlow = isDeadNow
+    ? "#EEF2F8"
+    : isDancingNow
     ? "#FFF176"
     : isHappy || isCelebratingNow
     ? "#FFF176"
@@ -1070,7 +1165,9 @@ const drawPet = () => {
       : palette.bodyGlow;
 
   // 身体阴影（跳得越高阴影越小越淡）
-  const shadowScale = isDancingNow
+  const shadowScale = isDeadNow
+    ? 0.84
+    : isDancingNow
     ? 0.92
     : isHappy || isCelebratingNow
     ? 1 - Math.sin(jumpPhase.value * Math.PI) * 0.3
@@ -1081,7 +1178,9 @@ const drawPet = () => {
     : isSleepy
       ? 0.92
       : 1;
-  const shadowAlpha = isDancingNow
+  const shadowAlpha = isDeadNow
+    ? 0.05
+    : isDancingNow
     ? 0.06
     : isHappy || isCelebratingNow
     ? 0.08 - Math.sin(jumpPhase.value * Math.PI) * 0.04
@@ -1115,7 +1214,7 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(-27, -30); ctx.lineTo(-33, -47); ctx.lineTo(-18, -33);
   ctx.closePath();
-  ctx.fillStyle = isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
+  ctx.fillStyle = isDeadNow ? "#DDE4EE" : isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   ctx.beginPath();
@@ -1126,11 +1225,19 @@ const drawPet = () => {
   ctx.beginPath();
   ctx.moveTo(27, -30); ctx.lineTo(33, -47); ctx.lineTo(18, -33);
   ctx.closePath();
-  ctx.fillStyle = isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
+  ctx.fillStyle = isDeadNow ? "#DDE4EE" : isDancingNow ? "#FFCC80" : isHappy || isCelebratingNow ? "#FFAB91" : isRequesting ? "#FFCC80" : palette.earInner;
   ctx.fill();
 
   // 眼睛
-  if (eyeBlink.value) {
+  if (isDeadNow) {
+    ctx.strokeStyle = "#6D7686";
+    ctx.lineWidth = palette.eyeWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-16, -8); ctx.lineTo(-8, -2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-16, -2); ctx.lineTo(-8, -8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, -8); ctx.lineTo(16, -2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(8, -2); ctx.lineTo(16, -8); ctx.stroke();
+  } else if (eyeBlink.value) {
     ctx.strokeStyle = "#5D4037";
     ctx.lineWidth = palette.eyeWidth;
     ctx.lineCap = "round";
@@ -1191,7 +1298,12 @@ const drawPet = () => {
   }
 
   // 嘴巴
-  if (isDancingNow) {
+  if (isDeadNow) {
+    ctx.beginPath();
+    ctx.arc(0, 8, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "#8C96A8";
+    ctx.fill();
+  } else if (isDancingNow) {
     ctx.beginPath();
     ctx.arc(0, 7, 9, 0.1 * Math.PI, 0.9 * Math.PI);
     ctx.strokeStyle = "#5D4037"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.stroke();
@@ -1225,7 +1337,7 @@ const drawPet = () => {
   }
 
   // 胡须
-  ctx.strokeStyle = isDancingNow ? "#D46B08" : isHappy || isCelebratingNow ? "#8D6E63" : isRequesting ? "#C28B33" : palette.accent;
+  ctx.strokeStyle = isDeadNow ? "#8C96A8" : isDancingNow ? "#D46B08" : isHappy || isCelebratingNow ? "#8D6E63" : isRequesting ? "#C28B33" : palette.accent;
   ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(-20, 2); ctx.lineTo(-38, -2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(-20, 6); ctx.lineTo(-38, 8); ctx.stroke();
@@ -1235,7 +1347,7 @@ const drawPet = () => {
   // 尾巴
   ctx.beginPath();
   ctx.moveTo(34, 18);
-  const tailWag = Math.sin(Date.now() / 300) * (isDancingNow ? 16 : isHappy || isCelebratingNow ? 12 : isRequesting ? 6 : isShy ? 3 : isSleepy ? 1 : isBored ? 2 : 4);
+  const tailWag = Math.sin(Date.now() / 300) * (isDeadNow ? 0 : isDancingNow ? 16 : isHappy || isCelebratingNow ? 12 : isRequesting ? 6 : isShy ? 3 : isSleepy ? 1 : isBored ? 2 : 4);
   ctx.quadraticCurveTo(55 + tailWag, 0, 48 + tailWag, -20);
   ctx.strokeStyle = bodyColor; ctx.lineWidth = palette.tailWidth; ctx.lineCap = "round"; ctx.stroke();
 
@@ -1312,7 +1424,7 @@ const drawPet = () => {
 
 // ─── 摸它 ───
 const handlePet = () => {
-  if (isFeeding.value || hasMoved) return;
+  if (isDead.value || isFeeding.value || isReviving.value || hasMoved) return;
   isPetting.value = true;
   petScale.value = 1.08;
   bumpIntimacy(2);
@@ -1344,7 +1456,7 @@ const handlePet = () => {
 };
 
 const handlePoke = () => {
-  if (isFeeding.value || hasMoved) return;
+  if (isDead.value || isFeeding.value || isReviving.value || hasMoved) return;
   isPoking.value = true;
   petScale.value = 1.06;
   bumpIntimacy(4);
@@ -1382,11 +1494,45 @@ const handlePoke = () => {
 
 // ─── 喂食 ───
 const handleFeed = () => {
+  if (isDead.value) {
+    if (isReviving.value) return;
+    if (!canRevive.value) {
+      ElMessage.warning(`复活需要 ${reviveCost.value} 积分`);
+      return;
+    }
+
+    isReviving.value = true;
+    const reviveRemark = `宠物复活（${deadDays.value}天）`;
+    void createPointsConsumption({
+      consumedPoints: reviveCost.value,
+      remark: reviveRemark,
+    })
+      .then(async () => {
+        markFedToday();
+        markInteraction();
+        fedAmount.value = 0;
+        petState.value = "hungry";
+        bubbleText.value = "我复活啦，谢谢你~";
+        showBubble.value = true;
+        await g.update();
+        syncMood();
+        setTimeout(() => {
+          showBubble.value = false;
+        }, 2500);
+      })
+      .catch(() => {})
+      .finally(() => {
+        isReviving.value = false;
+      });
+    return;
+  }
+
   if (!canFeed.value || isFeeding.value) return;
   isFeeding.value = true;
 
   const targetAmount = feedableAmount.value;
   fedAmount.value = targetAmount;
+  markFedToday();
 
   void updateTodayEatingCount({ eating: targetAmount })
     .then((count) => {
@@ -1442,6 +1588,7 @@ onMounted(() => {
 
   void Promise.allSettled([getEatingCount(), getTodayEatingCount()]).then(
     ([growthResult, satietyResult]) => {
+      const todayKey = dayjs().format("YYYY-MM-DD");
       if (growthResult.status === "fulfilled") {
         growthDays.value = growthResult.value;
       } else {
@@ -1453,10 +1600,21 @@ onMounted(() => {
           Math.max(satietyResult.value, 0),
           feedableAmount.value,
         );
+        if (fedAmount.value > 0) {
+          lastFeedDate.value = todayKey;
+          saveLastFeedDate(todayKey);
+          deadDays.value = 0;
+        }
       } else {
         fedAmount.value = 0;
       }
 
+      if (!lastFeedDate.value.trim()) {
+        lastFeedDate.value = todayKey;
+        saveLastFeedDate(todayKey);
+      }
+
+      syncDeathState();
       petState.value = fedAmount.value >= 80 ? "happy" : "hungry";
       syncMood();
     },
@@ -1551,7 +1709,9 @@ onUnmounted(() => {
           </div>
           <div class="pet-status" :class="petState">
             {{
-              petState === 'happy'
+              petState === 'dead'
+                ? '💀 死亡'
+                : petState === 'happy'
                 ? '😊 开心'
                 : petState === 'curious'
                   ? '✨ 想玩'
@@ -1571,22 +1731,22 @@ onUnmounted(() => {
         </div>
 
         <div class="pet-actions">
-          <button class="pet-btn pet-btn-pet" @click.stop="handlePet" :disabled="isPetting">
+          <button class="pet-btn pet-btn-pet" @click.stop="handlePet" :disabled="isDead || isPetting">
             🖐 摸摸
           </button>
-          <button class="pet-btn pet-btn-poke" @click.stop="handlePoke" :disabled="isPoking">
+          <button class="pet-btn pet-btn-poke" @click.stop="handlePoke" :disabled="isDead || isPoking">
             👆 戳戳
           </button>
-          <button class="pet-btn pet-btn-dance" @click.stop="handleDance" :disabled="isDancing || isFeeding || isCelebrating">
+          <button class="pet-btn pet-btn-dance" @click.stop="handleDance" :disabled="isDead || isDancing || isFeeding || isReviving || isCelebrating">
             💃 跳舞
           </button>
           <button
             class="pet-btn pet-btn-feed"
-            :class="{ disabled: !canFeed }"
+            :class="{ disabled: isDead ? !canRevive : !canFeed }"
             @click.stop="handleFeed"
-            :disabled="!canFeed || isFeeding"
+            :disabled="(isDead ? !canRevive : !canFeed) || isFeeding || isReviving"
           >
-            🍖 喂食
+            {{ isDead ? `💊 复活 ${reviveCost}` : "🍖 喂食" }}
           </button>
         </div>
       </template>
@@ -1843,6 +2003,10 @@ onUnmounted(() => {
   &.sleepy {
     background: rgba(211, 226, 255, 0.4);
     color: #3D5A80;
+  }
+  &.dead {
+    background: rgba(120, 130, 145, 0.22);
+    color: #4C5563;
   }
   &.eating {
     background: rgba(255, 213, 79, 0.26);
