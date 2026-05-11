@@ -154,7 +154,7 @@ const nextGoalText = computed(() => {
 });
 
 const milestoneNodes = computed(() => {
-  const picks = [0, 4, 9, 14, 19];
+  const picks = [0, 9, 19, 29, 39, 49];
   return picks
     .map((index) => nodes.value[index])
     .filter((node): node is MapNode => Boolean(node));
