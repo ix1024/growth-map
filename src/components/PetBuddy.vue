@@ -528,12 +528,47 @@ const computeEatingStreak = (
   return streak;
 };
 
+const computeLatestCheckinDate = (
+  list: Array<{
+    recordDate: string;
+    points?: number;
+    attitudePoints?: number;
+    extraPoints?: number;
+  }>,
+) => {
+  const activeDates = list
+    .filter((record) =>
+      Number(record.points ?? 0) > 0 ||
+      Number(record.attitudePoints ?? 0) > 0 ||
+      Number(record.extraPoints ?? 0) > 0,
+    )
+    .map((record) => record.recordDate)
+    .filter(Boolean)
+    .sort((a, b) => dayjs(a).valueOf() - dayjs(b).valueOf());
+
+  return activeDates[activeDates.length - 1] || "";
+};
+
 const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: number }>) => {
   monthlyDailyPoints.value = list;
   const nextStreak = computeEatingStreak(list);
   const prevStreak = streakDays.value;
   streakDays.value = nextStreak;
   saveStreakDays(nextStreak);
+
+  const lastCheckinDate = computeLatestCheckinDate(
+    list as Array<{
+      recordDate: string;
+      points?: number;
+      attitudePoints?: number;
+      extraPoints?: number;
+    }>,
+  );
+  if (lastCheckinDate) {
+    lastFeedDate.value = lastCheckinDate;
+    saveLastFeedDate(lastCheckinDate);
+  }
+  syncDeathState();
 
   if (nextStreak > prevStreak && streakMilestones.includes(nextStreak)) {
     bubbleText.value =
