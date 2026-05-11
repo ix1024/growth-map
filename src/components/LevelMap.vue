@@ -35,7 +35,7 @@ type RoadSegment = {
 const g = useGStore();
 
 const viewBoxWidth = 920;
-const viewBoxHeight = 1480;
+const viewBoxHeight = 2200;
 const startPoint: RoutePoint = {
   key: "start",
   x: viewBoxWidth / 2,
@@ -48,8 +48,8 @@ const levelMeta = computed(() => getLevelByPoints(currentScore.value));
 
 const nodes = computed<MapNode[]>(() => {
   const count = LEVEL_ANIMALS.length;
-  const topY = 238;
-  const bottomY = viewBoxHeight - 244;
+  const topY = 220;
+  const bottomY = viewBoxHeight - 220;
   const stepY = (bottomY - topY) / Math.max(count - 1, 1);
 
   return LEVEL_ANIMALS.map((title, index) => {
