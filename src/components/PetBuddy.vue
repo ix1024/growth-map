@@ -474,7 +474,7 @@ const streakLabel = computed(() => `${streakDays.value} 天`);
 const growthDaysLabel = computed(() => {
   return growthDays.value === null ? "--" : `${growthDays.value} 天`;
 });
-const isDead = computed(() => deadDays.value >= 1);
+const isDead = computed(() => deadDays.value > 2);
 const reviveCost = computed(() => Math.max(deadDays.value, 0) * 50);
 const canRevive = computed(() => g.availablePoints >= reviveCost.value);
 
@@ -549,21 +549,6 @@ const computeLatestCheckinDate = (
   return activeDates[activeDates.length - 1] || "";
 };
 
-const hasAnyCheckin = (
-  list: Array<{
-    points?: number;
-    attitudePoints?: number;
-    extraPoints?: number;
-  }>,
-) => {
-  return list.some(
-    (record) =>
-      Number(record.points ?? 0) > 0 ||
-      Number(record.attitudePoints ?? 0) > 0 ||
-      Number(record.extraPoints ?? 0) > 0,
-  );
-};
-
 const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: number }>) => {
   monthlyDailyPoints.value = list;
   const nextStreak = computeEatingStreak(list);
@@ -581,10 +566,6 @@ const syncStreakFromMonthlyPoints = (list: Array<{ recordDate: string; eating?: 
   if (lastCheckinDate) {
     lastFeedDate.value = lastCheckinDate;
     saveLastFeedDate(lastCheckinDate);
-  } else if (!hasAnyCheckin(checkinList)) {
-    const yesterdayKey = dayjs().subtract(1, "day").format("YYYY-MM-DD");
-    lastFeedDate.value = yesterdayKey;
-    saveLastFeedDate(yesterdayKey);
   }
   syncDeathState();
 
