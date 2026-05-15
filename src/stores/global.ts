@@ -15,6 +15,14 @@ type PointsBucket = {
   consumedPoints: number;
 };
 
+const getDrawConsumedPoints = (drawCount: number) => {
+  const count = Math.max(0, Math.floor(Number(drawCount) || 0));
+  if (count <= 3) return 0;
+  if (count <= 6) return count - 3;
+  if (count <= 9) return 3 + (count - 6) * 3;
+  return 22;
+};
+
 const defaultTheme: KidTheme = "eggparty";
 const themeAliases: Record<string, KidTheme> = {
   candy: "candy",
@@ -173,6 +181,9 @@ export const useGStore = defineStore("g", {
                 Number(item.points || 0),
               );
               acc[dateKey].attitudePoints = Number(item.attitudePoints || 0);
+              acc[dateKey].consumedPoints += getDrawConsumedPoints(
+                Number(item.drawCount || 0),
+              );
               return acc;
             },
             {} as Record<string, PointsBucket>,

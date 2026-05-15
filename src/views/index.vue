@@ -15,7 +15,7 @@ import { isRequestLoading } from "@/stores/requestLoading";
 import { ElMessage } from "element-plus";
 import { useGStore } from "@/stores/global";
 import { createExtraPoints } from "@/api/extraPoints";
-import { createDailyDraw } from "@/api/dailyPoints";
+import { createDailyDraw, getTodayDailyPoints } from "@/api/dailyPoints";
 import { createPointsConsumption } from "@/api/pointsConsumptions";
 import { setTheme } from "@/api/auth";
 export type KidTheme = "candy" | "ocean" | "rainbow" | "eggparty";
@@ -77,6 +77,9 @@ const lotteryDrawInfo = ref<{
   cost: number;
   remainingDrawCount: number;
 } | null>(null);
+const lotteryTodayDrawCount = ref(0);
+const lotteryMaxDrawCount = 10;
+const lotteryRuleLoading = ref(false);
 const wheelRotation = ref(0);
 let lotteryTimer: ReturnType<typeof window.setTimeout> | null = null;
 
@@ -111,6 +114,83 @@ const pickLotteryPrizeIndex = () => {
     if (random < 0) return index;
   }
   return lotteryPrizes.length - 1;
+};
+
+const getLotteryDrawCost = (nextDrawCount: number) => {
+  if (nextDrawCount <= 3) return 0;
+  if (nextDrawCount <= 6) return 1;
+  if (nextDrawCount <= 9) return 3;
+  return 10;
+};
+
+const getLotteryConsumedPoints = (drawCount: number) => {
+  const count = Math.max(0, Math.floor(Number(drawCount) || 0));
+  if (count <= 3) return 0;
+  if (count <= 6) return count - 3;
+  if (count <= 9) return 3 + (count - 6) * 3;
+  return 22;
+};
+
+const nextLotteryDrawCount = computed(() => lotteryTodayDrawCount.value + 1);
+
+const nextLotteryCost = computed(() => {
+  return getLotteryDrawCost(nextLotteryDrawCount.value);
+});
+
+const todayLotteryEarnedPoints = computed(() => {
+  const today = dayjs().format("YYYY-MM-DD");
+  return g.extraPointsList.reduce((sum, item) => {
+    const createdDate = dayjs(item.createdAt).format("YYYY-MM-DD");
+    const remark = String(item.remark || "");
+    if (createdDate !== today || !remark.startsWith("抽奖奖励")) {
+      return sum;
+    }
+    return sum + Number(item.points || 0);
+  }, 0);
+});
+
+const todayLotteryConsumedPoints = computed(() => {
+  return getLotteryConsumedPoints(lotteryTodayDrawCount.value);
+});
+
+const lotteryUnavailable = computed(() => {
+  return lotteryTodayDrawCount.value >= lotteryMaxDrawCount;
+});
+
+const lotteryRuleText = computed(() => {
+  if (lotteryRuleLoading.value) return "正在查询今日抽奖次数";
+  if (lotteryUnavailable.value) return "今日抽奖次数已用完";
+  const cost = nextLotteryCost.value;
+  if (cost <= 0) {
+    return `今日已抽 ${lotteryTodayDrawCount.value} 次，本次免费`;
+  }
+  return `今日已抽 ${lotteryTodayDrawCount.value} 次，本次消耗 ${cost} 积分`;
+});
+
+const nextLotteryCostText = computed(() => {
+  if (lotteryUnavailable.value) return "今日抽奖次数已用完";
+  const cost = nextLotteryCost.value;
+  return cost > 0 ? `下次消耗 ${cost} 积分` : "下次免费";
+});
+
+const lotteryActionText = computed(() => {
+  if (lotteryRunning.value) return "抽奖中";
+  if (lotteryUnavailable.value) return "今日已抽完";
+  const cost = nextLotteryCost.value;
+  if (cost <= 0) return lotteryResult.value ? "再抽一次 免费" : "免费抽奖";
+  return `${lotteryResult.value ? "再抽一次" : "立即抽奖"} -${cost}`;
+});
+
+const refreshLotteryRule = async () => {
+  lotteryRuleLoading.value = true;
+  try {
+    const todayRecord = await getTodayDailyPoints();
+    lotteryTodayDrawCount.value = Number(todayRecord?.drawCount || 0);
+  } catch {
+    lotteryTodayDrawCount.value = 0;
+  } finally {
+    lotteryRuleLoading.value = false;
+  }
 };
 
 const applyTheme = (theme: KidTheme) => {
@@ -209,8 +289,11 @@ const handleOpenExtraDialog = () => {
   extraRemark.value = "";
 };
 
-const handleOpenLotteryDialog = () => {
+const handleOpenLotteryDialog = async () => {
   showLotteryDialog.value = true;
+  lotteryResult.value = null;
+  lotteryDrawInfo.value = null;
+  await refreshLotteryRule();
 };
 
 const fireLotteryConfetti = () => {
@@ -237,7 +320,7 @@ const fireLotteryConfetti = () => {
 };
 
 const handleStartLottery = async () => {
-  if (lotteryRunning.value) return;
+  if (lotteryRunning.value || lotteryUnavailable.value) return;
 
   lotteryRunning.value = true;
   lotteryResult.value = null;
@@ -252,8 +335,10 @@ const handleStartLottery = async () => {
       cost: Number(drawPayload.cost || 0),
       remainingDrawCount: Number(drawPayload.remainingDrawCount || 0),
     };
+    lotteryTodayDrawCount.value = lotteryDrawInfo.value.drawCount;
   } catch {
     lotteryRunning.value = false;
+    await refreshLotteryRule();
     return;
   }
 
@@ -583,21 +668,31 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
             <strong>谢谢参与</strong>
           </template>
           <small v-if="lotteryDrawInfo">
-            第 {{ lotteryDrawInfo.drawCount }} 次，消耗
-            {{ lotteryDrawInfo.cost }} 积分
+            {{
+              lotteryDrawInfo.cost > 0
+                ? `本次消耗 ${lotteryDrawInfo.cost} 积分`
+                : "本次免费"
+            }}，今日已抽 {{ lotteryDrawInfo.drawCount }} 次；{{
+              nextLotteryCostText
+            }}
           </small>
         </template>
-        <template v-else>每日 3 次免费，最多抽 10 次</template>
+        <template v-else>{{ lotteryRuleText }}</template>
       </div>
       <div class="lottery-actions">
         <el-button
           class="lottery-start-btn"
           type="primary"
+          :disabled="lotteryUnavailable || lotteryRuleLoading"
           :loading="lotteryRunning"
           @click="handleStartLottery"
         >
-          {{ lotteryRunning ? "抽奖中" : "立即抽奖" }}
+          {{ lotteryActionText }}
         </el-button>
+      </div>
+      <div class="lottery-summary">
+        今日抽奖已获得 {{ todayLotteryEarnedPoints }} 积分，已消耗
+        {{ todayLotteryConsumedPoints }} 积分
       </div>
     </el-dialog>
 
@@ -1152,6 +1247,15 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
   font-size: 12px;
   font-weight: 800;
   line-height: 1.2;
+}
+
+.lottery-summary {
+  margin-top: 10px;
+  color: rgba(83, 94, 128, 0.5);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .lottery-actions {
