@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import confetti from "canvas-confetti";
 import dayjs from "dayjs";
 
 import User from "@/components/User.vue";
@@ -14,6 +15,7 @@ import { isRequestLoading } from "@/stores/requestLoading";
 import { ElMessage } from "element-plus";
 import { useGStore } from "@/stores/global";
 import { createExtraPoints } from "@/api/extraPoints";
+import { createDailyDraw } from "@/api/dailyPoints";
 import { createPointsConsumption } from "@/api/pointsConsumptions";
 import { setTheme } from "@/api/auth";
 export type KidTheme = "candy" | "ocean" | "rainbow" | "eggparty";
@@ -56,6 +58,27 @@ const extraQuickOptions = [
   { label: "一等奖", points: 500, remark: "一等奖" },
   { label: "特等奖", points: 800, remark: "特等奖" },
 ] as const;
+const lotteryPrizes = [
+  { label: "未中奖", icon: "☁️", points: 0, weight: 25, color: "#9aa6bd" },
+  { label: "1积分", icon: "🌱", points: 1, weight: 25, color: "#43dd9a" },
+  { label: "2积分", icon: "🍀", points: 2, weight: 17, color: "#2fd2c6" },
+  { label: "5积分", icon: "⭐", points: 5, weight: 13, color: "#28c7ff" },
+  { label: "10积分", icon: "⚡", points: 10, weight: 9, color: "#7c6cff" },
+  { label: "50积分", icon: "💎", points: 50, weight: 5, color: "#ff6fb7" },
+  { label: "100积分", icon: "🏆", points: 100, weight: 5, color: "#ff8a57" },
+  { label: "1000积分", icon: "👑", points: 1000, weight: 1, color: "#ffbf47" },
+] as const;
+const showLotteryDialog = ref(false);
+const lotteryRunning = ref(false);
+const lotteryResult = ref<(typeof lotteryPrizes)[number] | null>(null);
+const lotteryDrawInfo = ref<{
+  drawCount: number;
+  maxDrawCount: number;
+  cost: number;
+  remainingDrawCount: number;
+} | null>(null);
+const wheelRotation = ref(0);
+let lotteryTimer: ReturnType<typeof window.setTimeout> | null = null;
 
 const pageTitle = computed(() => {
   const name = g.userInfo?.nickname?.trim();
@@ -68,6 +91,27 @@ const todayCompletionRate = computed(() => {
   const todayBucket = g.monthlyPoints[today];
   return todayBucket ? Math.min(todayBucket.points, 100) : 0;
 });
+
+const wheelBackground = computed(() => {
+  const segment = 360 / lotteryPrizes.length;
+  return lotteryPrizes
+    .map((item, index) => {
+      const start = index * segment;
+      const end = (index + 1) * segment;
+      return `${item.color} ${start}deg ${end}deg`;
+    })
+    .join(", ");
+});
+
+const pickLotteryPrizeIndex = () => {
+  const totalWeight = lotteryPrizes.reduce((sum, item) => sum + item.weight, 0);
+  let random = Math.random() * totalWeight;
+  for (let index = 0; index < lotteryPrizes.length; index += 1) {
+    random -= lotteryPrizes[index].weight;
+    if (random < 0) return index;
+  }
+  return lotteryPrizes.length - 1;
+};
 
 const applyTheme = (theme: KidTheme) => {
   document.documentElement.setAttribute("data-theme", theme);
@@ -85,6 +129,12 @@ const handleLoginSuccess = async () => {
 
 onMounted(async () => {
   await g.checkAuthStatus();
+});
+
+onUnmounted(() => {
+  if (lotteryTimer) {
+    window.clearTimeout(lotteryTimer);
+  }
 });
 
 watch(
@@ -157,6 +207,85 @@ const handleOpenExtraDialog = () => {
   extraMode.value = "custom";
   extraPointsValue.value = undefined;
   extraRemark.value = "";
+};
+
+const handleOpenLotteryDialog = () => {
+  showLotteryDialog.value = true;
+};
+
+const fireLotteryConfetti = () => {
+  confetti({
+    particleCount: 90,
+    spread: 80,
+    origin: { y: 0.58 },
+    colors: ["#ff7b37", "#ff5ca8", "#28c7ff", "#43dd9a", "#ffd166"],
+  });
+  window.setTimeout(() => {
+    confetti({
+      particleCount: 70,
+      angle: 60,
+      spread: 60,
+      origin: { x: 0, y: 0.65 },
+    });
+    confetti({
+      particleCount: 70,
+      angle: 120,
+      spread: 60,
+      origin: { x: 1, y: 0.65 },
+    });
+  }, 220);
+};
+
+const handleStartLottery = async () => {
+  if (lotteryRunning.value) return;
+
+  lotteryRunning.value = true;
+  lotteryResult.value = null;
+  lotteryDrawInfo.value = null;
+
+  let drawPayload: Awaited<ReturnType<typeof createDailyDraw>>;
+  try {
+    drawPayload = await createDailyDraw();
+    lotteryDrawInfo.value = {
+      drawCount: Number(drawPayload.drawCount || 0),
+      maxDrawCount: Number(drawPayload.maxDrawCount || 10),
+      cost: Number(drawPayload.cost || 0),
+      remainingDrawCount: Number(drawPayload.remainingDrawCount || 0),
+    };
+  } catch {
+    lotteryRunning.value = false;
+    return;
+  }
+
+  const prizeIndex = pickLotteryPrizeIndex();
+  const segment = 360 / lotteryPrizes.length;
+  const targetAngle = 360 - (prizeIndex * segment + segment / 2);
+  const currentBase = wheelRotation.value % 360;
+  wheelRotation.value = wheelRotation.value + 360 * 7 + targetAngle - currentBase;
+
+  lotteryTimer = window.setTimeout(async () => {
+    const prize = lotteryPrizes[prizeIndex];
+    lotteryResult.value = prize;
+    lotteryRunning.value = false;
+
+    if (prize.points > 0) {
+      try {
+        await createExtraPoints({
+          points: prize.points,
+          remark: `抽奖奖励：${prize.label}`,
+        });
+        fireLotteryConfetti();
+        ElMessage.success(`抽中 ${prize.label}，奖励 ${prize.points} 积分`);
+        await g.update();
+      } catch {
+        ElMessage.error("抽奖结果保存失败，请稍后重试");
+        await g.update();
+      }
+    } else {
+      ElMessage.info("很遗憾，本次未中奖");
+      await g.update();
+    }
+  }, 3600);
 };
 
 const handleCancelExtra = () => {
@@ -247,6 +376,15 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
     >
       <span class="floating-extra-icon">+</span>
       <span class="floating-extra-text">奖励</span>
+    </button>
+
+    <button
+      class="floating-lottery-btn"
+      type="button"
+      @click="handleOpenLotteryDialog"
+    >
+      <span class="floating-lottery-icon">★</span>
+      <span class="floating-lottery-text">抽奖</span>
     </button>
 
     <!-- <button
@@ -390,6 +528,75 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
           @click="handleConfirmExtra"
         >
           确认添加
+        </el-button>
+      </div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="showLotteryDialog"
+      title="幸运抽奖"
+      width="480"
+      :z-index="10060"
+      align-center
+      class="lottery-dialog"
+    >
+      <div class="lottery-stage" :class="{ running: lotteryRunning }">
+        <div class="lottery-aurora"></div>
+        <div class="lottery-pointer"></div>
+        <div
+          class="lottery-wheel"
+          :style="{
+            '--wheel-bg': wheelBackground,
+            transform: `rotate(${wheelRotation}deg)`,
+          }"
+        >
+          <div
+            v-for="(prize, index) in lotteryPrizes"
+            :key="prize.label"
+            class="lottery-prize"
+          >
+            <span
+              :style="{
+                transform: `translate(-50%, -50%) rotate(${index * (360 / lotteryPrizes.length) + 360 / lotteryPrizes.length / 2}deg) translateY(-92px) rotate(-${wheelRotation + index * (360 / lotteryPrizes.length) + 360 / lotteryPrizes.length / 2}deg)`,
+              }"
+            >
+              <b>{{ prize.icon }}</b>
+              <em>{{ prize.points > 0 ? prize.points : "未中" }}</em>
+            </span>
+          </div>
+          <div
+            class="lottery-core"
+            :style="{ transform: `translate(-50%, -50%) rotate(${-wheelRotation}deg)` }"
+          >
+            <span>LUCKY</span>
+          </div>
+        </div>
+        <div class="lottery-ring"></div>
+      </div>
+      <div class="lottery-result" :class="{ visible: lotteryResult }">
+        <template v-if="lotteryResult">
+          <template v-if="lotteryResult.points > 0">
+            <span>{{ lotteryResult.points }}积分</span>
+          </template>
+          <template v-else>
+            <span>未中奖</span>
+            <strong>谢谢参与</strong>
+          </template>
+          <small v-if="lotteryDrawInfo">
+            第 {{ lotteryDrawInfo.drawCount }} 次，消耗
+            {{ lotteryDrawInfo.cost }} 积分
+          </small>
+        </template>
+        <template v-else>每日 3 次免费，最多抽 10 次</template>
+      </div>
+      <div class="lottery-actions">
+        <el-button
+          class="lottery-start-btn"
+          type="primary"
+          :loading="lotteryRunning"
+          @click="handleStartLottery"
+        >
+          {{ lotteryRunning ? "抽奖中" : "立即抽奖" }}
         </el-button>
       </div>
     </el-dialog>
@@ -565,7 +772,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
   position: fixed;
   right: 18px;
   bottom: 20px;
-  z-index: 12;
+  z-index: 10020;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -670,7 +877,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
   position: fixed;
   right: 18px;
   bottom: 82px;
-  z-index: 12;
+  z-index: 10020;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -714,6 +921,298 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
 .floating-extra-text {
   font-size: 14px;
   font-weight: 800;
+}
+
+.floating-lottery-btn {
+  position: fixed;
+  right: 18px;
+  bottom: 144px;
+  z-index: 10020;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 16px 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, #7c6cff, #ff5ca8 48%, #ffbf47),
+    rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow:
+    0 12px 28px rgba(124, 108, 255, 0.34),
+    0 0 24px rgba(255, 92, 168, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  animation: lotteryButtonPulse 1.8s ease-in-out infinite;
+}
+
+.floating-lottery-btn:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow:
+    0 16px 34px rgba(124, 108, 255, 0.42),
+    0 0 30px rgba(255, 92, 168, 0.36),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.36);
+}
+
+.floating-lottery-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+  color: #fff7c8;
+  background: rgba(255, 255, 255, 0.28);
+  text-shadow: 0 0 10px rgba(255, 247, 200, 0.9);
+}
+
+.floating-lottery-text {
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.lottery-stage {
+  position: relative;
+  width: min(280px, 70vw);
+  height: min(280px, 70vw);
+  margin: 2px auto 14px;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+
+.lottery-aurora {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  background:
+    conic-gradient(from 0deg, #ffbf47, #ff5ca8, #7c6cff, #28c7ff, #43dd9a, #ffbf47);
+  filter: blur(18px);
+  opacity: 0.66;
+  animation: auroraSpin 3.6s linear infinite;
+}
+
+.lottery-pointer {
+  position: absolute;
+  top: 0;
+  z-index: 4;
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-top: 30px solid #fff;
+  filter: drop-shadow(0 8px 10px rgba(55, 44, 105, 0.26));
+}
+
+.lottery-wheel {
+  position: relative;
+  z-index: 2;
+  width: 88%;
+  height: 88%;
+  border-radius: 50%;
+  background: conic-gradient(var(--wheel-bg));
+  border: 8px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 18px 34px rgba(49, 57, 103, 0.22),
+    0 0 0 6px rgba(255, 255, 255, 0.28),
+    inset 0 0 24px rgba(255, 255, 255, 0.32);
+  transition: transform 3.6s cubic-bezier(0.12, 0.82, 0.14, 1);
+  overflow: hidden;
+}
+
+.lottery-wheel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.34), transparent 22%),
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(255, 255, 255, 0.24) 0deg 1deg,
+      transparent 1deg 60deg
+    );
+  pointer-events: none;
+}
+
+.lottery-stage.running .lottery-wheel {
+  box-shadow:
+    0 22px 46px rgba(49, 57, 103, 0.32),
+    0 0 0 8px rgba(255, 255, 255, 0.32),
+    0 0 42px rgba(255, 92, 168, 0.36),
+    inset 0 0 34px rgba(255, 255, 255, 0.46);
+}
+
+.lottery-prize {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lottery-prize span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 54px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: #fff;
+  font-weight: 900;
+  text-align: center;
+  text-shadow:
+    0 1px 3px rgba(31, 38, 74, 0.42),
+    0 0 8px rgba(255, 255, 255, 0.32);
+  white-space: nowrap;
+}
+
+.lottery-prize b {
+  display: block;
+  font-size: 18px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(31, 38, 74, 0.24));
+}
+
+.lottery-prize em {
+  display: block;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1;
+}
+
+.lottery-core {
+  position: absolute;
+  inset: 50%;
+  z-index: 3;
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.9), transparent 19%),
+    linear-gradient(135deg, var(--main-accent), var(--sub-accent));
+  box-shadow:
+    0 10px 20px rgba(53, 48, 101, 0.24),
+    inset 0 0 0 4px rgba(255, 255, 255, 0.35);
+}
+
+.lottery-core span {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.lottery-ring {
+  position: absolute;
+  inset: 8%;
+  z-index: 1;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.76);
+  animation: ringSpin 8s linear infinite reverse;
+}
+
+.lottery-result {
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #536184;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.lottery-result.visible span {
+  color: #2f4676;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.lottery-result.visible strong {
+  color: var(--sub-accent);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.lottery-result small {
+  color: #6d7899;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.lottery-actions {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+
+:deep(.lottery-dialog .el-dialog) {
+  max-width: calc(100vw - 24px);
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.86), transparent 44%),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--main-accent) 17%, #fff),
+      color-mix(in srgb, var(--sub-accent) 18%, #fff)
+    );
+  box-shadow: 0 22px 48px rgba(49, 57, 103, 0.28);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+:deep(.lottery-dialog .el-dialog__header) {
+  padding: 18px 22px 0;
+  margin-right: 0;
+}
+
+:deep(.lottery-dialog .el-dialog__title) {
+  display: block;
+  font-size: 24px;
+  font-weight: 900;
+  text-align: center;
+  color: transparent;
+  background: linear-gradient(90deg, var(--main-accent), var(--sub-accent), #28c7ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+:deep(.lottery-dialog .el-dialog__body) {
+  padding: 10px 22px 22px;
+}
+
+:deep(.lottery-start-btn.el-button) {
+  min-width: 180px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 900;
+  background: linear-gradient(90deg, #7c6cff, var(--sub-accent), var(--main-accent));
+  box-shadow:
+    0 12px 22px rgba(255, 92, 168, 0.32),
+    0 0 20px rgba(124, 108, 255, 0.24);
+}
+
+:deep(.lottery-start-btn.el-button:hover) {
+  transform: translateY(-1px);
+  opacity: 0.96;
 }
 
 .add-dialog-body {
@@ -994,6 +1493,28 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
   }
 }
 
+@keyframes lotteryButtonPulse {
+  0%,
+  100% {
+    filter: saturate(1);
+  }
+  50% {
+    filter: saturate(1.18) brightness(1.05);
+  }
+}
+
+@keyframes auroraSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ringSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 768px) {
   .page {
     padding: 16px 10px 78px;
@@ -1080,14 +1601,57 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
     font-size: 13px;
   }
 
+  .floating-lottery-btn {
+    right: 14px;
+    bottom: 266px;
+    height: 48px;
+    padding: 0 12px 0 10px;
+    gap: 6px;
+  }
+
+  .floating-lottery-icon {
+    width: 26px;
+    height: 26px;
+    font-size: 15px;
+  }
+
+  .floating-lottery-text {
+    font-size: 13px;
+  }
+
+  .lottery-prize span {
+    width: 66px;
+    font-size: 11px;
+    transform-origin: center center;
+  }
+
+  .lottery-core {
+    width: 82px;
+    height: 82px;
+  }
+
+  .lottery-core span {
+    font-size: 13px;
+  }
+
   :deep(.add-dialog .el-dialog) {
     width: calc(100% - 20px) !important;
     margin: 0 auto;
     border-radius: 18px;
   }
 
+  :deep(.lottery-dialog .el-dialog) {
+    width: calc(100% - 20px) !important;
+    margin: 0 auto;
+    border-radius: 20px;
+  }
+
   :deep(.add-dialog .el-dialog__title) {
     font-size: 20px;
+  }
+
+  :deep(.lottery-dialog .el-dialog__title) {
+    font-size: 22px;
   }
 }
 </style>

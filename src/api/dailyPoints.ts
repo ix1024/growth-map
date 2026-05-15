@@ -7,9 +7,20 @@ export interface DailyPointRecord {
   points: number;
   attitudePoints?: number;
   eating?: number;
+  drawCount?: number;
   selectedIds?: number[];
   createdAt?: string | null;
   updatedAt?: string | null;
+}
+
+export interface DailyDrawPayload {
+  userId?: string | number | null;
+  recordDate: string;
+  drawCount: number;
+  maxDrawCount: number;
+  cost: number;
+  remainingDrawCount: number;
+  dailyPoint?: DailyPointRecord | null;
 }
 
 export interface DailyPointsPayload {
@@ -161,4 +172,8 @@ export const updateTodayEatingCount = (payload: {
   return http.put<unknown>("/daily-points/eating", payload).then((response) => {
     return normalizeEatingCount(response);
   });
+};
+
+export const createDailyDraw = () => {
+  return http.post<DailyDrawPayload>("/daily-points/draw");
 };
