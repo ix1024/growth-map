@@ -18,6 +18,7 @@ import { createExtraPoints } from "@/api/extraPoints";
 import { createDailyDraw, getTodayDailyPoints } from "@/api/dailyPoints";
 import { createPointsConsumption } from "@/api/pointsConsumptions";
 import { setTheme } from "@/api/auth";
+import { getTodoConfig } from "@/api/todo";
 export type KidTheme = "candy" | "ocean" | "rainbow" | "eggparty";
 const g = useGStore();
 const themeOptions: Array<{ label: string; value: KidTheme }> = [
@@ -78,10 +79,13 @@ const lotteryDrawInfo = ref<{
   remainingDrawCount: number;
 } | null>(null);
 const lotteryTodayDrawCount = ref(0);
+const lotteryTodayTodoCompleted = ref(false);
 const lotteryMaxDrawCount = 10;
 const lotteryRuleLoading = ref(false);
+const lotteryClockNow = ref(dayjs());
 const wheelRotation = ref(0);
 let lotteryTimer: ReturnType<typeof window.setTimeout> | null = null;
+let lotteryClockTimer: ReturnType<typeof window.setInterval> | null = null;
 
 const pageTitle = computed(() => {
   const name = g.userInfo?.nickname?.trim();
@@ -153,13 +157,30 @@ const todayLotteryConsumedPoints = computed(() => {
   return getLotteryConsumedPoints(lotteryTodayDrawCount.value);
 });
 
+const isLotteryTimeAvailable = computed(() => {
+  const minutes =
+    lotteryClockNow.value.hour() * 60 + lotteryClockNow.value.minute();
+  return minutes >= 18 * 60 && minutes < 22 * 60;
+});
+
 const lotteryUnavailable = computed(() => {
   return lotteryTodayDrawCount.value >= lotteryMaxDrawCount;
 });
 
+const lotteryBlockedReason = computed(() => {
+  if (lotteryRuleLoading.value) return "";
+  if (!lotteryTodayTodoCompleted.value && !isLotteryTimeAvailable.value) {
+    return "完成今日待办后，18:00-22:00 可抽奖";
+  }
+  if (!lotteryTodayTodoCompleted.value) return "完成今日待办后才可以抽奖";
+  if (!isLotteryTimeAvailable.value) return "抽奖时间为每天 18:00-22:00";
+  if (lotteryUnavailable.value) return "今日抽奖次数已用完";
+  return "";
+});
+
 const lotteryRuleText = computed(() => {
   if (lotteryRuleLoading.value) return "正在查询今日抽奖次数";
-  if (lotteryUnavailable.value) return "今日抽奖次数已用完";
+  if (lotteryBlockedReason.value) return lotteryBlockedReason.value;
   const cost = nextLotteryCost.value;
   if (cost <= 0) {
     return `今日已抽 ${lotteryTodayDrawCount.value} 次，本次免费`;
@@ -168,14 +189,14 @@ const lotteryRuleText = computed(() => {
 });
 
 const nextLotteryCostText = computed(() => {
-  if (lotteryUnavailable.value) return "今日抽奖次数已用完";
+  if (lotteryBlockedReason.value) return lotteryBlockedReason.value;
   const cost = nextLotteryCost.value;
   return cost > 0 ? `下次消耗 ${cost} 积分` : "下次免费";
 });
 
 const lotteryActionText = computed(() => {
   if (lotteryRunning.value) return "抽奖中";
-  if (lotteryUnavailable.value) return "今日已抽完";
+  if (lotteryBlockedReason.value) return "暂不可抽奖";
   const cost = nextLotteryCost.value;
   if (cost <= 0) return lotteryResult.value ? "再抽一次 免费" : "免费抽奖";
   return `${lotteryResult.value ? "再抽一次" : "立即抽奖"} -${cost}`;
@@ -184,10 +205,28 @@ const lotteryActionText = computed(() => {
 const refreshLotteryRule = async () => {
   lotteryRuleLoading.value = true;
   try {
-    const todayRecord = await getTodayDailyPoints();
+    const [todayRecord, todoConfig] = await Promise.all([
+      getTodayDailyPoints(),
+      getTodoConfig(),
+    ]);
     lotteryTodayDrawCount.value = Number(todayRecord?.drawCount || 0);
+    const enabledTodoIds = Array.isArray(todoConfig)
+      ? todoConfig
+          .filter((item) => item.enabled !== false)
+          .map((item) => Number(item.id))
+          .filter(Number.isInteger)
+      : [];
+    const selectedIds = new Set(
+      Array.isArray(todayRecord?.selectedIds)
+        ? todayRecord.selectedIds.map((item) => Number(item))
+        : [],
+    );
+    lotteryTodayTodoCompleted.value =
+      enabledTodoIds.length > 0 &&
+      enabledTodoIds.every((id) => selectedIds.has(id));
   } catch {
     lotteryTodayDrawCount.value = 0;
+    lotteryTodayTodoCompleted.value = false;
   } finally {
     lotteryRuleLoading.value = false;
   }
@@ -214,6 +253,9 @@ onMounted(async () => {
 onUnmounted(() => {
   if (lotteryTimer) {
     window.clearTimeout(lotteryTimer);
+  }
+  if (lotteryClockTimer) {
+    window.clearInterval(lotteryClockTimer);
   }
 });
 
@@ -293,6 +335,13 @@ const handleOpenLotteryDialog = async () => {
   showLotteryDialog.value = true;
   lotteryResult.value = null;
   lotteryDrawInfo.value = null;
+  lotteryClockNow.value = dayjs();
+  if (lotteryClockTimer) {
+    window.clearInterval(lotteryClockTimer);
+  }
+  lotteryClockTimer = window.setInterval(() => {
+    lotteryClockNow.value = dayjs();
+  }, 30_000);
   await refreshLotteryRule();
 };
 
@@ -320,7 +369,12 @@ const fireLotteryConfetti = () => {
 };
 
 const handleStartLottery = async () => {
-  if (lotteryRunning.value || lotteryUnavailable.value) return;
+  if (lotteryRunning.value || lotteryRuleLoading.value) return;
+  await refreshLotteryRule();
+  if (lotteryBlockedReason.value) {
+    ElMessage.warning(lotteryBlockedReason.value);
+    return;
+  }
 
   lotteryRunning.value = true;
   lotteryResult.value = null;
@@ -683,7 +737,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
         <el-button
           class="lottery-start-btn"
           type="primary"
-          :disabled="lotteryUnavailable || lotteryRuleLoading"
+          :disabled="Boolean(lotteryBlockedReason) || lotteryRuleLoading"
           :loading="lotteryRunning"
           @click="handleStartLottery"
         >
