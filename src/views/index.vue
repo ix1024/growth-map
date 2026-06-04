@@ -87,7 +87,7 @@ const wheelRotation = ref(0);
 let lotteryTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lotteryClockTimer: ReturnType<typeof window.setInterval> | null = null;
 let lotteryAudioContext: AudioContext | null = null;
-let lotterySpinSoundTimer: ReturnType<typeof window.setInterval> | null = null;
+let lotterySpinSoundTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lotterySpinSoundStep = 0;
 
 const pageTitle = computed(() => {
@@ -261,6 +261,7 @@ onUnmounted(() => {
     window.clearInterval(lotteryClockTimer);
   }
   stopLotterySpinSound();
+  window.removeEventListener("keydown", handleLotteryKeydown);
   lotteryAudioContext?.close().catch(() => {});
   lotteryAudioContext = null;
 });
@@ -278,8 +279,11 @@ watchEffect(() => {
 });
 
 watch(showLotteryDialog, (visible) => {
-  if (!visible) {
+  if (visible) {
+    window.addEventListener("keydown", handleLotteryKeydown);
+  } else {
     stopLotterySpinSound();
+    window.removeEventListener("keydown", handleLotteryKeydown);
   }
 });
 
@@ -377,25 +381,25 @@ const playLotterySpinTick = () => {
   const oscillator = audioContext.createOscillator();
   const gainNode = audioContext.createGain();
   const now = audioContext.currentTime;
-  const frequency = 520 + (lotterySpinSoundStep % 8) * 38;
-  lotterySpinSoundStep += 1;
 
-  oscillator.type = "triangle";
-  oscillator.frequency.setValueAtTime(frequency, now);
-  oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.25, now + 0.045);
+  // 低频方波模拟转盘拨片打过卡口的机械点击声，轻微音高变化增加真实感
+  oscillator.type = "square";
+  oscillator.frequency.setValueAtTime(155 + (lotterySpinSoundStep % 4) * 12, now);
   gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(0.09, now + 0.008);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+  gainNode.gain.exponentialRampToValueAtTime(0.2, now + 0.003);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.022);
 
   oscillator.connect(gainNode);
   gainNode.connect(audioContext.destination);
   oscillator.start(now);
-  oscillator.stop(now + 0.06);
+  oscillator.stop(now + 0.025);
+
+  lotterySpinSoundStep += 1;
 };
 
 const stopLotterySpinSound = () => {
   if (lotterySpinSoundTimer) {
-    window.clearInterval(lotterySpinSoundTimer);
+    window.clearTimeout(lotterySpinSoundTimer);
     lotterySpinSoundTimer = null;
   }
 };
@@ -403,8 +407,24 @@ const stopLotterySpinSound = () => {
 const startLotterySpinSound = () => {
   stopLotterySpinSound();
   lotterySpinSoundStep = 0;
-  playLotterySpinTick();
-  lotterySpinSoundTimer = window.setInterval(playLotterySpinTick, 86);
+
+  // 用 setTimeout 链模拟转盘从快速旋转到逐渐减速的节奏：
+  // 起始间隔 30ms（快速），随时间推移增大到 320ms（慢速停止），总时长约 3.4s
+  const TOTAL_MS = 3400;
+  const startInterval = 30;
+  const endInterval = 320;
+  let elapsed = 0;
+
+  const tick = () => {
+    if (elapsed >= TOTAL_MS) return;
+    playLotterySpinTick();
+    const progress = elapsed / TOTAL_MS;
+    const interval = startInterval + (endInterval - startInterval) * Math.pow(progress, 0.6);
+    elapsed += interval;
+    lotterySpinSoundTimer = window.setTimeout(tick, interval);
+  };
+
+  tick();
 };
 
 const fireLotteryConfetti = () => {
@@ -490,6 +510,14 @@ const handleStartLottery = async () => {
       await g.update();
     }
   }, 3600);
+};
+
+/** 抽奖弹窗打开时，按空格键触发抽奖 */
+const handleLotteryKeydown = (e: KeyboardEvent) => {
+  if (e.code === "Space" || e.key === " ") {
+    e.preventDefault();
+    handleStartLottery();
+  }
 };
 
 const handleCancelExtra = () => {
