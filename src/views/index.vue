@@ -60,7 +60,7 @@ const extraQuickOptions = [
   { label: "特等奖", points: 800, remark: "特等奖" },
 ] as const;
 const lotteryPrizes = [
-  { label: "未中奖", icon: "☁️", points: 0, weight: 25, color: "#9aa6bd" },
+  { label: "谢谢参考", icon: "☁️", points: 0, weight: 25, color: "#9aa6bd" },
   { label: "1积分", icon: "🌱", points: 1, weight: 25, color: "#43dd9a" },
   { label: "2积分", icon: "🍀", points: 2, weight: 17, color: "#2fd2c6" },
   { label: "5积分", icon: "⭐", points: 5, weight: 13, color: "#28c7ff" },
@@ -86,6 +86,9 @@ const lotteryClockNow = ref(dayjs());
 const wheelRotation = ref(0);
 let lotteryTimer: ReturnType<typeof window.setTimeout> | null = null;
 let lotteryClockTimer: ReturnType<typeof window.setInterval> | null = null;
+let lotteryAudioContext: AudioContext | null = null;
+let lotterySpinSoundTimer: ReturnType<typeof window.setInterval> | null = null;
+let lotterySpinSoundStep = 0;
 
 const pageTitle = computed(() => {
   const name = g.userInfo?.nickname?.trim();
@@ -257,6 +260,9 @@ onUnmounted(() => {
   if (lotteryClockTimer) {
     window.clearInterval(lotteryClockTimer);
   }
+  stopLotterySpinSound();
+  lotteryAudioContext?.close().catch(() => {});
+  lotteryAudioContext = null;
 });
 
 watch(
@@ -269,6 +275,12 @@ watch(
 
 watchEffect(() => {
   document.title = pageTitle.value;
+});
+
+watch(showLotteryDialog, (visible) => {
+  if (!visible) {
+    stopLotterySpinSound();
+  }
 });
 
 const handleOpenAddDialog = () => {
@@ -345,6 +357,56 @@ const handleOpenLotteryDialog = async () => {
   await refreshLotteryRule();
 };
 
+const ensureLotteryAudioContext = () => {
+  if (lotteryAudioContext) return lotteryAudioContext;
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!AudioContextClass) return null;
+  lotteryAudioContext = new AudioContextClass();
+  return lotteryAudioContext;
+};
+
+const playLotterySpinTick = () => {
+  const audioContext = ensureLotteryAudioContext();
+  if (!audioContext) return;
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {});
+  }
+  const oscillator = audioContext.createOscillator();
+  const gainNode = audioContext.createGain();
+  const now = audioContext.currentTime;
+  const frequency = 520 + (lotterySpinSoundStep % 8) * 38;
+  lotterySpinSoundStep += 1;
+
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(frequency, now);
+  oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.25, now + 0.045);
+  gainNode.gain.setValueAtTime(0.0001, now);
+  gainNode.gain.exponentialRampToValueAtTime(0.09, now + 0.008);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+  oscillator.start(now);
+  oscillator.stop(now + 0.06);
+};
+
+const stopLotterySpinSound = () => {
+  if (lotterySpinSoundTimer) {
+    window.clearInterval(lotterySpinSoundTimer);
+    lotterySpinSoundTimer = null;
+  }
+};
+
+const startLotterySpinSound = () => {
+  stopLotterySpinSound();
+  lotterySpinSoundStep = 0;
+  playLotterySpinTick();
+  lotterySpinSoundTimer = window.setInterval(playLotterySpinTick, 86);
+};
+
 const fireLotteryConfetti = () => {
   confetti({
     particleCount: 90,
@@ -370,6 +432,7 @@ const fireLotteryConfetti = () => {
 
 const handleStartLottery = async () => {
   if (lotteryRunning.value || lotteryRuleLoading.value) return;
+  ensureLotteryAudioContext();
   await refreshLotteryRule();
   if (lotteryBlockedReason.value) {
     ElMessage.warning(lotteryBlockedReason.value);
@@ -401,8 +464,10 @@ const handleStartLottery = async () => {
   const targetAngle = 360 - (prizeIndex * segment + segment / 2);
   const currentBase = wheelRotation.value % 360;
   wheelRotation.value = wheelRotation.value + 360 * 7 + targetAngle - currentBase;
+  startLotterySpinSound();
 
   lotteryTimer = window.setTimeout(async () => {
+    stopLotterySpinSound();
     const prize = lotteryPrizes[prizeIndex];
     lotteryResult.value = prize;
     lotteryRunning.value = false;
@@ -421,7 +486,7 @@ const handleStartLottery = async () => {
         await g.update();
       }
     } else {
-      ElMessage.info("很遗憾，本次未中奖");
+      ElMessage.info("谢谢参考，下次再来");
       await g.update();
     }
   }, 3600);
@@ -700,7 +765,7 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
               }"
             >
               <b>{{ prize.icon }}</b>
-              <em>{{ prize.points > 0 ? prize.points : "未中" }}</em>
+              <em>{{ prize.points > 0 ? prize.points : "谢谢参考" }}</em>
             </span>
           </div>
           <div
@@ -718,8 +783,8 @@ const applyExtraQuickOption = (option: (typeof extraQuickOptions)[number]) => {
             <span>{{ lotteryResult.points }}积分</span>
           </template>
           <template v-else>
-            <span>未中奖</span>
-            <strong>谢谢参与</strong>
+            <span>谢谢参考</span>
+            <strong>下次再来</strong>
           </template>
           <small v-if="lotteryDrawInfo">
             {{
